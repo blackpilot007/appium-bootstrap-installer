@@ -15,6 +15,41 @@ function Write-Log {
 Write-Log "Clean Appium Installation Script for Windows"
 Write-Log "Installation Folder: $InstallFolder"
 
+# Helper: Remove-Item with retries to mitigate transient EPERM / file-lock errors
+function Remove-ItemWithRetries {
+    param(
+        [Parameter(Mandatory=$true)] [string]$Path,
+        [switch]$Recurse,
+        [switch]$Force,
+        [int]$MaxAttempts = 3,
+        [int]$DelayMs = 300
+    )
+
+    $splat = @{}
+    $splat.Path = $Path
+    if ($Recurse) { $splat.Recurse = $true }
+    if ($Force) { $splat.Force = $true }
+    $splat.ErrorAction = 'Stop'
+
+    for ($i=1; $i -le $MaxAttempts; $i++) {
+        try {
+            Remove-Item @splat
+            return $true
+        }
+        catch {
+            if ($i -lt $MaxAttempts) {
+                Write-Log "This is try $i/$MaxAttempts for Remove-Item '$Path'. Retrying after $DelayMs ms." "INF"
+                Start-Sleep -Milliseconds $DelayMs
+                continue
+            }
+            else {
+                Write-Log "Remove-Item failed for '$Path' after $MaxAttempts attempts: $_" "WARN"
+                return $false
+            }
+        }
+    }
+}
+
 if (-not $Force) {
     $response = Read-Host "This will delete the existing Appium installation. Continue? (y/n)"
     if ($response -ne 'y' -and $response -ne 'Y') {
@@ -34,7 +69,7 @@ try {
     $appiumHome = "$InstallFolder\appium-home"
     if (Test-Path $appiumHome) {
         Write-Log "Removing Appium home directory: $appiumHome"
-        Remove-Item -Path $appiumHome -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-ItemWithRetries -Path $appiumHome -Recurse -Force
         Write-Log "Removed Appium home directory"
     }
     else {
@@ -45,7 +80,7 @@ try {
     $appiumConfigDir = "$env:USERPROFILE\.appium"
     if (Test-Path $appiumConfigDir) {
         Write-Log "Removing global Appium config: $appiumConfigDir"
-        Remove-Item -Path $appiumConfigDir -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-ItemWithRetries -Path $appiumConfigDir -Recurse -Force
         Write-Log "Removed global Appium config"
     }
     
@@ -53,7 +88,7 @@ try {
     $binDir = "$InstallFolder\bin"
     if (Test-Path "$binDir\appium.bat") {
         Write-Log "Removing Appium wrapper scripts"
-        Remove-Item -Path "$binDir\appium.bat" -Force -ErrorAction SilentlyContinue
+        Remove-ItemWithRetries -Path "$binDir\appium.bat" -Force
     }
     
     Write-Log "================================================================"

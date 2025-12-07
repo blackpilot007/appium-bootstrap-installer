@@ -74,6 +74,24 @@ function Resolve-NpmPath {
     $cmd2 = Get-Command npm -ErrorAction SilentlyContinue
     if ($cmd2) { return $cmd2.Source }
 
+    # As a last resort, if node is present but npm.cmd is missing, try to locate npm-cli.js
+    if ($nodePath -and (Test-Path "$nodePath\node.exe")) {
+        $npmCli = Join-Path $nodePath 'node_modules\npm\bin\npm-cli.js'
+        if (Test-Path $npmCli) {
+            # Create a small wrapper npm.cmd next to node.exe so callers can invoke npm normally
+            $wrapper = Join-Path $nodePath 'npm.cmd'
+            try {
+                $nodeExePath = Join-Path $nodePath 'node.exe'
+                $content = "@echo off`r`n`"$nodeExePath`" `"$npmCli`" %*"
+                Set-Content -Path $wrapper -Value $content -Encoding ASCII -Force
+                return $wrapper
+            }
+            catch {
+                # ignore wrapper creation errors and fall through to returning null
+            }
+        }
+    }
+
     return $null
 }
 
@@ -98,6 +116,41 @@ function Invoke-WithRetries {
             else {
                 Write-Log "Maximum tries of $MaxAttempts reached. Throwing error." "ERR"
                 throw
+            }
+        }
+    }
+}
+
+# Helper: Remove-Item with retries to mitigate transient EPERM / file-lock errors
+function Remove-ItemWithRetries {
+    param(
+        [Parameter(Mandatory=$true)] [string]$Path,
+        [switch]$Recurse,
+        [switch]$Force,
+        [int]$MaxAttempts = 3,
+        [int]$DelayMs = 300
+    )
+
+    $splat = @{}
+    $splat.Path = $Path
+    if ($Recurse) { $splat.Recurse = $true }
+    if ($Force) { $splat.Force = $true }
+    $splat.ErrorAction = 'Stop'
+
+    for ($i=1; $i -le $MaxAttempts; $i++) {
+        try {
+            Remove-Item @splat
+            return $true
+        }
+        catch {
+            if ($i -lt $MaxAttempts) {
+                Write-Log "This is try $i/$MaxAttempts for Remove-Item '$Path'. Retrying after $DelayMs ms." "INF"
+                Start-Sleep -Milliseconds $DelayMs
+                continue
+            }
+            else {
+                Write-Log "Remove-Item failed for '$Path' after $MaxAttempts attempts: $_" "WARN"
+                return $false
             }
         }
     }
@@ -279,12 +332,30 @@ function Install-NodeJS {
                 Expand-Archive -Path $zipPath -DestinationPath $extractTmp -Force
                 
                 # Move content (Node zip contains a root folder)
-                $subFolder = Get-ChildItem $extractTmp | Select-Object -First 1
-                Move-Item "$($subFolder.FullName)" $destDir
+                $subFolder = Get-ChildItem $extractTmp -Directory | Select-Object -First 1
+                if (-not $subFolder) {
+                    throw "No subdirectory found after extracting Node.js archive"
+                }
+                
+                # Ensure destination doesn't exist before moving
+                if (Test-Path $destDir) {
+                    Remove-ItemWithRetries -Path $destDir -Recurse -Force -MaxAttempts 3 -DelayMs 200
+                }
+                
+                Move-Item -Path $subFolder.FullName -Destination $destDir -Force
+                
+                # Verify node.exe exists after move
+                if (-not (Test-Path "$destDir\node.exe")) {
+                    throw "node.exe not found in $destDir after extraction and move"
+                }
             }
             finally {
-                if (Test-Path $extractTmp) { Remove-Item -Recurse -Force $extractTmp -ErrorAction SilentlyContinue }
-                if (Test-Path $zipPath) { Remove-Item -Force $zipPath -ErrorAction SilentlyContinue }
+                if (Test-Path $extractTmp) { 
+                    Remove-ItemWithRetries -Path $extractTmp -Recurse -Force -MaxAttempts 3 -DelayMs 200
+                }
+                if (Test-Path $zipPath) { 
+                    Remove-ItemWithRetries -Path $zipPath -Force -MaxAttempts 3 -DelayMs 200
+                }
             }
              
             Write-Log "Manual installation of Node.js $fullVersion completed."
@@ -834,8 +905,8 @@ function Install-GoIos {
             throw "go-ios binary not found after extraction"
         }
         
-        # Clean up
-        Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
+        # Clean up (use retry wrapper to reduce transient EPERM errors)
+        Remove-ItemWithRetries -Path $zipPath -Force
     }
     catch {
         Write-ErrorMessage "GO-IOS INSTALLATION"
@@ -890,8 +961,9 @@ function Install-DeviceFarm {
         # Make sure node dir is on PATH for child processes that may call node internally
         if (Test-Path "$nodePath\node.exe") { $env:Path = "$nodePath;$env:Path" }
 
+        $nodeExe = Join-Path $nodePath 'node.exe'
         $appiumScript = "$appiumHome\node_modules\appium\build\lib\main.js"
-        $appiumVersionOutput = & "$nodePath\node.exe" $appiumScript --version 2>&1
+        $appiumVersionOutput = & $nodeExe $appiumScript --version 2>&1
         $appiumMajorVersion = $appiumVersionOutput.Split('.')[0]
         Write-Log "Detected Appium version: $appiumVersionOutput (Major: $appiumMajorVersion)"
 
@@ -912,14 +984,14 @@ function Install-DeviceFarm {
             Write-Log "Installing $pluginName@$pluginVersion..."
 
             # Uninstall existing plugin (use node + main.js to avoid relying on other wrappers)
-            try {
-                Invoke-WithRetries { & "$nodePath\node.exe" $appiumScript plugin uninstall $pluginName 2>$null } -MaxAttempts 2 -DelayMs 200
-            } catch { }
+                try {
+                    Invoke-WithRetries { & $nodeExe $appiumScript plugin uninstall $pluginName 2>$null } -MaxAttempts 2 -DelayMs 200
+                } catch { }
 
-            # Install plugin using appropriate command (use 'plugin install' for Appium 3+)
-            try {
-                Invoke-WithRetries { & "$nodePath\node.exe" $appiumScript plugin install "$pluginName@$pluginVersion" } -MaxAttempts 3 -DelayMs 300
-            }
+                # Install plugin using appropriate command (use 'plugin install' for Appium 3+)
+                try {
+                    Invoke-WithRetries { & $nodeExe $appiumScript plugin install "$pluginName@$pluginVersion" } -MaxAttempts 3 -DelayMs 300
+                }
             catch {
                 Write-Log "Plugin installation via Appium command had issues, trying npm fallback..." "WARN"
                 if (-not $npmPath) { $npmPath = Resolve-NpmPath -nodePath $nodePath }
@@ -947,7 +1019,7 @@ function Install-DeviceFarm {
         Write-Log "Verifying plugin installations..."
         # Prefer node+main.js for plugin listing to avoid wrapper/path issues
         try {
-            $pluginList = & "$nodePath\node.exe" $appiumScript plugin list --installed
+            $pluginList = & $nodeExe $appiumScript plugin list --installed
             Write-Log $pluginList
         } catch {
             Write-Log "Failed to list plugins via node+main.js; attempting npm-based check" "WARN"
