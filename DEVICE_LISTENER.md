@@ -11,7 +11,6 @@ The Device Listener is an integrated background service within AppiumBootstrapIn
 1. **DeviceListenerService** - Background worker that polls for device connections
 2. **DeviceRegistry** - Manages device state and persists to JSON database
 3. **AppiumSessionManager** - Handles Appium server lifecycle with NSSM (Windows) or Supervisord (Linux/macOS)
-4. **WebhookNotifier** - Sends HTTP notifications for device events
 
 ### Process Management Strategy
 
@@ -39,9 +38,9 @@ Device Connected → Detect via ADB/idevice → Registry Update → Create Servi
                                                           - MJPEG Stream Port (iOS: 9100-9200)
                                                           - System Port (Android: 8200-8300)
                                                                       ↓
-                                                          Start Process → Send Webhook
+                                                          Start Appium Server
 
-Device Disconnected → Detect Absence → Stop Service/Program → Release Ports → Send Webhook
+Device Disconnected → Detect Absence → Stop Service/Program → Release Ports
 ```
 
 ## Configuration
@@ -88,18 +87,6 @@ Add to your `config.json`:
     "systemPortStart": 8200,
     "systemPortEnd": 8300
   },
-  "webhooks": {
-    "enabled": true,
-    "onConnectUrl": "http://your-server/api/device/connected",
-    "onDisconnectUrl": "http://your-server/api/device/disconnected",
-    "onSessionStartUrl": "http://your-server/api/session/started",
-    "onSessionEndUrl": "http://your-server/api/session/ended",
-    "headers": {
-      "Authorization": "Bearer YOUR_TOKEN",
-      "Content-Type": "application/json"
-    },
-    "timeoutSeconds": 30
-  },
   "deviceRegistry": {
     "enabled": true,
     "filePath": "device-registry.json",
@@ -124,13 +111,6 @@ Add to your `config.json`:
 | `portRanges.mjpegEnd` | number | `9200` | End of MJPEG port range (iOS) |
 | `portRanges.systemPortStart` | number | `8200` | Start of system port range (Android) |
 | `portRanges.systemPortEnd` | number | `8300` | End of system port range (Android) |
-| `webhooks.enabled` | boolean | `false` | Enable webhook notifications |
-| `webhooks.onConnectUrl` | string | `null` | URL for device connect events |
-| `webhooks.onDisconnectUrl` | string | `null` | URL for device disconnect events |
-| `webhooks.onSessionStartUrl` | string | `null` | URL for session start events |
-| `webhooks.onSessionEndUrl` | string | `null` | URL for session end events |
-| `webhooks.headers` | object | `{}` | Custom HTTP headers for webhooks |
-| `webhooks.timeoutSeconds` | number | `30` | Webhook request timeout |
 | `deviceRegistry.enabled` | boolean | `true` | Enable device registry persistence |
 | `deviceRegistry.filePath` | string | `"device-registry.json"` | Registry file path |
 | `deviceRegistry.autoSave` | boolean | `true` | Auto-save registry changes |
@@ -177,30 +157,9 @@ AppiumBootstrapInstaller.exe --listen --config config.json
    - Tracks connection times, session ports, process status
    - Auto-saves every 30 seconds
 
-4. **Webhook Notifications**
-   - Sends POST requests for all device lifecycle events
-   ```json
-   {
-     "eventType": "Connected",
-     "device": {
-       "id": "emulator-5554",
-       "platform": "Android",
-       "type": "Emulator",
-       "name": "Pixel_5_API_31",
-       "state": "Connected",
-       "connectedAt": "2025-12-07T10:30:00Z",
-       "appiumSession": {
-         "sessionId": "abc-123",
-         "appiumPort": 4723,
-         "systemPort": 8200,
-         "startedAt": "2025-12-07T10:30:05Z",
-         "processId": 12345,
-         "status": "Running"
-       }
-     },
-     "timestamp": "2025-12-07T10:30:05Z"
-   }
-   ```
+1. **Device Detection** - Polls ADB (Android) and idevice_id (iOS) tools
+2. **Registry Update** - Persists device information to JSON
+3. **Appium Session Creation** - Starts isolated Appium server via NSSM/Supervisord
 
 ## Service Management
 
@@ -307,76 +266,6 @@ supervisorctl remove AppiumBootstrap_emulator_5554
 - **Conflict Prevention**: Tracks used ports in memory
 - **Automatic Release**: Ports freed when device disconnects
 
-## Webhook Events
-
-### 1. Device Connected
-- **Trigger**: New device detected
-- **Payload**: Device info with empty session
-
-### 2. Session Started
-- **Trigger**: Appium process started successfully
-- **Payload**: Device info with session details (ports, PID)
-
-### 3. Device Disconnected
-- **Trigger**: Device no longer detected
-- **Payload**: Device info with final state
-
-### 4. Session Ended
-- **Trigger**: Appium process terminated (device disconnect or manual stop)
-- **Payload**: Device info with session status = Stopped
-
-## Integration Examples
-
-### 1. Slack Notifications
-
-```javascript
-// Express.js webhook receiver
-app.post('/api/device/connected', (req, res) => {
-  const { device } = req.body;
-  slack.send({
-    text: `📱 Device Connected: ${device.name} (${device.platform})`,
-    channel: '#device-farm'
-  });
-  res.sendStatus(200);
-});
-```
-
-### 2. Test Orchestration
-
-```javascript
-app.post('/api/session/started', async (req, res) => {
-  const { device } = req.body;
-  const { appiumPort, sessionId } = device.appiumSession;
-  
-  // Queue test suite for this device
-  await testQueue.add({
-    deviceId: device.id,
-    appiumUrl: `http://localhost:${appiumPort}/wd/hub`,
-    platform: device.platform
-  });
-  
-  res.sendStatus(200);
-});
-```
-
-### 3. Database Tracking
-
-```javascript
-app.post('/api/device/connected', async (req, res) => {
-  const { device } = req.body;
-  
-  await db.devices.upsert({
-    id: device.id,
-    name: device.name,
-    platform: device.platform,
-    lastConnected: new Date(),
-    status: 'online'
-  });
-  
-  res.sendStatus(200);
-});
-```
-
 ## Logs
 
 Device listener and individual Appium services log to:
@@ -408,7 +297,6 @@ Example main listener log:
 [2025-12-07 10:30:06] [DEBUG] Starting NSSM service: AppiumBootstrap_emulator_5554
 [2025-12-07 10:30:08] [INFO] NSSM service AppiumBootstrap_emulator_5554 started successfully
 [2025-12-07 10:30:08] [INFO] Appium session started for emulator-5554 on port 4723 (Service: AppiumBootstrap_emulator_5554)
-[2025-12-07 10:30:08] [INFO] Webhook device-connected sent successfully
 ```
 
 Example device-specific Appium log (`AppiumBootstrap_emulator_5554_stdout.log`):
@@ -495,13 +383,6 @@ tail -f /var/log/supervisor/supervisord.log
 - Check for external processes using ports: `netstat -ano | findstr :4723` (Windows) or `lsof -i :4723` (Linux/macOS)
 - Increase port ranges in config if needed
 
-### Webhooks Not Sending
-
-- Verify webhook URL is accessible
-- Check network/firewall settings
-- Review timeout configuration (default 30s)
-- Test webhook endpoint: `curl -X POST <webhook_url> -d '{"test": true}'`
-
 ### Service Cleanup After Crash
 
 **Windows**:
@@ -538,10 +419,9 @@ supervisorctl update
 
 ## Security Notes
 
-- Webhook URLs should use HTTPS in production
-- Use authentication tokens in webhook headers
 - Device registry may contain sensitive device identifiers
 - Consider encrypting registry file at rest
+- Restrict file system access to registry and log files
 
 ## Extending
 
@@ -555,7 +435,6 @@ private async Task OnDeviceConnectedAsync(Device device)
     _logger.LogInformation("Device connected: {DeviceId}", device.Id);
     
     _registry.AddOrUpdateDevice(device);
-    await _webhookNotifier.NotifyDeviceConnectedAsync(device);
     
     // Your custom logic here
     if (device.Platform == DevicePlatform.Android)

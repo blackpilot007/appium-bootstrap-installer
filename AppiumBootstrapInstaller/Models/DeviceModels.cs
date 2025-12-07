@@ -141,33 +141,6 @@ namespace AppiumBootstrapInstaller.Models
     }
 
     /// <summary>
-    /// Webhook notification configuration
-    /// </summary>
-    public class WebhookConfig
-    {
-        [JsonPropertyName("enabled")]
-        public bool Enabled { get; set; } = false;
-
-        [JsonPropertyName("onConnect")]
-        public string? OnConnectUrl { get; set; }
-
-        [JsonPropertyName("onDisconnect")]
-        public string? OnDisconnectUrl { get; set; }
-
-        [JsonPropertyName("onSessionStart")]
-        public string? OnSessionStartUrl { get; set; }
-
-        [JsonPropertyName("onSessionEnd")]
-        public string? OnSessionEndUrl { get; set; }
-
-        [JsonPropertyName("headers")]
-        public Dictionary<string, string> Headers { get; set; } = new();
-
-        [JsonPropertyName("timeoutSeconds")]
-        public int TimeoutSeconds { get; set; } = 30;
-    }
-
-    /// <summary>
     /// Device registry storage configuration
     /// </summary>
     public class DeviceRegistryConfig

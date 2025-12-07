@@ -40,18 +40,6 @@
         "systemPortStart": 8200,
         "systemPortEnd": 8300
     },
-    "webhooks": {
-        "enabled": false,
-        "onConnectUrl": "http://localhost:3000/api/device/connected",
-        "onDisconnectUrl": "http://localhost:3000/api/device/disconnected",
-        "onSessionStartUrl": "http://localhost:3000/api/session/started",
-        "onSessionEndUrl": "http://localhost:3000/api/session/ended",
-        "headers": {
-            "Authorization": "Bearer YOUR_TOKEN_HERE",
-            "Content-Type": "application/json"
-        },
-        "timeoutSeconds": 30
-    },
     "deviceRegistry": {
         "enabled": true,
         "filePath": "device-registry.json",

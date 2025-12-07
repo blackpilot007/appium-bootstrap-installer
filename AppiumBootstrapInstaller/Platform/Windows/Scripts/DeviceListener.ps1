@@ -138,7 +138,7 @@ function On-DeviceConnected {
         Write-DeviceLog "Android $type connected: $serial" "INFO"
         
         # Optional: Trigger custom actions here
-        # Example: Start Appium session, notify webhook, etc.
+        # Example: Start Appium session, configure device, etc.
     }
     elseif ($Platform -eq "iOS") {
         $udid = $Device.UDID

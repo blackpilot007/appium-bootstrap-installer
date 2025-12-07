@@ -32,7 +32,8 @@ namespace AppiumBootstrapInstaller.Services
         private readonly string _installFolder;
         private readonly DeviceRegistry _registry;
         private readonly AppiumSessionManager _sessionManager;
-        private readonly WebhookNotifier _webhookNotifier;
+        private readonly DeviceMetrics _metrics;
+        private Timer? _metricsTimer;
 
         public DeviceListenerService(
             ILogger<DeviceListenerService> logger,
@@ -40,14 +41,22 @@ namespace AppiumBootstrapInstaller.Services
             string installFolder,
             DeviceRegistry registry,
             AppiumSessionManager sessionManager,
-            WebhookNotifier webhookNotifier)
+            DeviceMetrics metrics)
         {
             _logger = logger;
             _config = config;
             _installFolder = installFolder;
             _registry = registry;
             _sessionManager = sessionManager;
-            _webhookNotifier = webhookNotifier;
+            _metrics = metrics;
+            
+            // Log metrics every 5 minutes
+            _metricsTimer = new Timer(
+                _ => _logger.LogInformation("[METRICS] {Summary}", _metrics.GetSummary()),
+                null,
+                TimeSpan.FromMinutes(5),
+                TimeSpan.FromMinutes(5)
+            );
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -281,27 +290,58 @@ namespace AppiumBootstrapInstaller.Services
 
         private async Task OnDeviceConnectedAsync(Device device)
         {
-            _logger.LogInformation(
-                "Device connected: {DeviceId} ({Platform}, {Type}) - {Name}",
-                device.Id, device.Platform, device.Type, device.Name
-            );
-
-            _registry.AddOrUpdateDevice(device);
-            await _webhookNotifier.NotifyDeviceConnectedAsync(device);
-
-            if (_config.AutoStartAppium)
+            var correlationId = Guid.NewGuid().ToString("N")[..8];
+            using (_logger.BeginScope(new Dictionary<string, object>
             {
-                var session = await _sessionManager.StartSessionAsync(device);
-                if (session != null)
-                {
-                    device.AppiumSession = session;
-                    _registry.AddOrUpdateDevice(device);
-                    await _webhookNotifier.NotifySessionStartedAsync(device);
+                ["CorrelationId"] = correlationId,
+                ["DeviceId"] = device.Id,
+                ["Platform"] = device.Platform.ToString()
+            }))
+            {
+                _logger.LogInformation(
+                    "[{CorrelationId}] Device connected: {DeviceId} ({Platform}, {Type}) - {Name}",
+                    correlationId, device.Id, device.Platform, device.Type, device.Name
+                );
 
-                    _logger.LogInformation(
-                        "Appium session started for {DeviceId} on port {Port}",
-                        device.Id, session.AppiumPort
-                    );
+                _metrics.RecordDeviceConnected(device.Platform.ToString());
+                _registry.AddOrUpdateDevice(device);
+
+                if (_config.AutoStartAppium)
+                {
+                    var startTime = DateTime.UtcNow;
+                    try
+                    {
+                        var session = await _sessionManager.StartSessionAsync(device);
+                        if (session != null)
+                        {
+                            var duration = DateTime.UtcNow - startTime;
+                            _metrics.RecordSessionStarted(duration);
+                            
+                            device.AppiumSession = session;
+                            _registry.AddOrUpdateDevice(device);
+
+                            _logger.LogInformation(
+                                "[{CorrelationId}] Appium session started for {DeviceId} on port {Port} (took {Duration}ms)",
+                                correlationId, device.Id, session.AppiumPort, duration.TotalMilliseconds
+                            );
+                        }
+                        else
+                        {
+                            _metrics.RecordSessionFailed("StartSessionReturnedNull");
+                            _logger.LogWarning(
+                                "[{CorrelationId}] Failed to start Appium session for {DeviceId} - returned null",
+                                correlationId, device.Id
+                            );
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _metrics.RecordSessionFailed(ex.GetType().Name);
+                        _logger.LogError(ex,
+                            "[{CorrelationId}] Exception starting Appium session for {DeviceId}",
+                            correlationId, device.Id
+                        );
+                    }
                 }
             }
         }
@@ -311,16 +351,42 @@ namespace AppiumBootstrapInstaller.Services
             var device = _registry.GetDevice(deviceId);
             if (device == null) return;
 
-            _logger.LogInformation("Device disconnected: {DeviceId}", deviceId);
-
-            if (device.AppiumSession != null)
+            var correlationId = Guid.NewGuid().ToString("N")[..8];
+            using (_logger.BeginScope(new Dictionary<string, object>
             {
-                await _sessionManager.StopSessionAsync(device.AppiumSession);
-                await _webhookNotifier.NotifySessionEndedAsync(device);
-            }
+                ["CorrelationId"] = correlationId,
+                ["DeviceId"] = deviceId
+            }))
+            {
+                _logger.LogInformation(
+                    "[{CorrelationId}] Device disconnected: {DeviceId}",
+                    correlationId, deviceId
+                );
 
-            _registry.RemoveDevice(deviceId);
-            await _webhookNotifier.NotifyDeviceDisconnectedAsync(device);
+                _metrics.RecordDeviceDisconnected(device.Platform.ToString());
+
+                if (device.AppiumSession != null)
+                {
+                    try
+                    {
+                        await _sessionManager.StopSessionAsync(device.AppiumSession);
+                        _metrics.RecordSessionStopped();
+                        _logger.LogInformation(
+                            "[{CorrelationId}] Appium session stopped for {DeviceId}",
+                            correlationId, deviceId
+                        );
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex,
+                            "[{CorrelationId}] Error stopping Appium session for {DeviceId}",
+                            correlationId, deviceId
+                        );
+                    }
+                }
+
+                _registry.RemoveDevice(deviceId);
+            }
         }
 
         private async Task StopAllSessionsAsync()

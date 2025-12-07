@@ -38,15 +38,18 @@ namespace AppiumBootstrapInstaller.Services
         private readonly bool _isWindows;
         private readonly string? _nssmPath;
         private readonly string? _supervisorctlPath;
+        private readonly DeviceMetrics _metrics;
 
         public AppiumSessionManager(
             ILogger<AppiumSessionManager> logger,
             string installFolder,
-            PortRangeConfig portConfig)
+            PortRangeConfig portConfig,
+            DeviceMetrics metrics)
         {
             _logger = logger;
             _installFolder = installFolder;
             _portConfig = portConfig;
+            _metrics = metrics;
             _isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
 
             // Detect process manager
@@ -58,6 +61,10 @@ namespace AppiumBootstrapInstaller.Services
                     _logger.LogWarning("NSSM not found at {Path}. Will use direct process execution.", _nssmPath);
                     _nssmPath = null;
                 }
+                else
+                {
+                    _logger.LogInformation("Using NSSM for process management: {Path}", _nssmPath);
+                }
             }
             else
             {
@@ -65,6 +72,10 @@ namespace AppiumBootstrapInstaller.Services
                 if (_supervisorctlPath == null)
                 {
                     _logger.LogWarning("supervisorctl not found. Will use direct process execution.");
+                }
+                else
+                {
+                    _logger.LogInformation("Using Supervisord for process management: {Path}", _supervisorctlPath);
                 }
             }
         }
@@ -480,14 +491,44 @@ environment=HOME=""{Environment.GetEnvironmentVariable("HOME")}"",USER=""{Enviro
             await _portLock.WaitAsync();
             try
             {
+                var totalPorts = end - start + 1;
+                var availablePorts = totalPorts - usedPorts.Count;
+                var usagePercent = (double)usedPorts.Count / totalPorts * 100;
+
+                // Warn if running low on ports
+                if (usagePercent >= 90)
+                {
+                    _logger.LogWarning(
+                        "Port pool critically low: {Used}/{Total} ports used ({Percent:F1}%). Range: {Start}-{End}",
+                        usedPorts.Count, totalPorts, usagePercent, start, end
+                    );
+                }
+                else if (usagePercent >= 70)
+                {
+                    _logger.LogWarning(
+                        "Port pool running low: {Used}/{Total} ports used ({Percent:F1}%). Range: {Start}-{End}",
+                        usedPorts.Count, totalPorts, usagePercent, start, end
+                    );
+                }
+
                 for (int port = start; port <= end; port++)
                 {
                     if (!usedPorts.Contains(port) && IsPortAvailable(port))
                     {
                         usedPorts.Add(port);
+                        _logger.LogDebug(
+                            "Allocated port {Port} from range {Start}-{End} ({Available} available)",
+                            port, start, end, availablePorts - 1
+                        );
                         return port;
                     }
                 }
+                
+                _metrics.RecordPortAllocationFailure();
+                _logger.LogError(
+                    "No available ports in range {Start}-{End}. All {Total} ports are in use.",
+                    start, end, end - start + 1
+                );
                 return 0;
             }
             finally

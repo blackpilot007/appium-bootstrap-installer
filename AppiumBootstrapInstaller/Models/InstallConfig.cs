@@ -53,9 +53,6 @@ namespace AppiumBootstrapInstaller.Models
         [JsonPropertyName("portRanges")]
         public PortRangeConfig PortRanges { get; set; } = new();
 
-        [JsonPropertyName("webhooks")]
-        public WebhookConfig Webhooks { get; set; } = new();
-
         [JsonPropertyName("deviceRegistry")]
         public DeviceRegistryConfig DeviceRegistry { get; set; } = new();
 

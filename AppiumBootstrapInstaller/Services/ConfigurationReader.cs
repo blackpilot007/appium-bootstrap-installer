@@ -58,35 +58,59 @@ namespace AppiumBootstrapInstaller.Services
             try
             {
                 string jsonContent = File.ReadAllText(configPath);
+                _logger.LogDebug("Configuration file size: {Size} bytes", jsonContent.Length);
+                
                 var config = JsonSerializer.Deserialize(jsonContent, AppJsonSerializerContext.Default.InstallConfig);
 
                 if (config == null)
                 {
-                    throw new InvalidOperationException("Failed to deserialize configuration file");
+                    _logger.LogError("Configuration deserialization returned null");
+                    throw new InvalidOperationException("Failed to deserialize configuration file - result was null");
                 }
 
                 // Expand environment variables in paths
                 config.InstallFolder = ExpandEnvironmentVariables(config.InstallFolder);
+                _logger.LogDebug("Install folder expanded to: {InstallFolder}", config.InstallFolder);
 
                 // Validate configuration
                 var validationErrors = config.Validate();
                 if (validationErrors.Any())
                 {
+                    _logger.LogError("Configuration validation failed with {Count} error(s)", validationErrors.Count);
                     foreach (var error in validationErrors)
                     {
-                        _logger.LogError("Validation error: {Error}", error);
+                        _logger.LogError("  - {Error}", error);
                     }
                     throw new InvalidOperationException(
                         $"Configuration validation failed:\n  - {string.Join("\n  - ", validationErrors)}"
                     );
                 }
 
+                _logger.LogInformation("Configuration loaded and validated successfully");
                 return config;
+            }
+            catch (FileNotFoundException ex)
+            {
+                _logger.LogError(ex, "Configuration file not found: {Path}", configPath);
+                throw;
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                _logger.LogError(ex, "Access denied reading configuration file: {Path}", configPath);
+                throw new InvalidOperationException($"Access denied reading configuration file: {configPath}", ex);
             }
             catch (JsonException ex)
             {
-                _logger.LogError(ex, "Failed to parse configuration file");
-                throw new InvalidOperationException($"Failed to parse configuration file: {ex.Message}", ex);
+                _logger.LogError(ex, "Failed to parse configuration JSON. Check file format at: {Path}", configPath);
+                throw new InvalidOperationException(
+                    $"Failed to parse configuration file. Invalid JSON format at line {ex.LineNumber}, position {ex.BytePositionInLine}: {ex.Message}",
+                    ex
+                );
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error loading configuration from: {Path}", configPath);
+                throw;
             }
         }
 

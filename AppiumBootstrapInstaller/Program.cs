@@ -17,6 +17,7 @@
 using System;
 using System.Runtime.InteropServices;
 using AppiumBootstrapInstaller.Services;
+using AppiumBootstrapInstaller.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Serilog;
@@ -96,9 +97,10 @@ namespace AppiumBootstrapInstaller
                 logger.LogInformation("  Drivers: {DriversCount} enabled", config.Drivers.Count(d => d.Enabled));
                 logger.LogInformation("  Plugins: {PluginsCount} enabled", config.Plugins.Count(p => p.Enabled));
 
-                // Run in listen mode if requested
+                // Run in listen-only mode if requested (skip installation)
                 if (options.ListenMode)
                 {
+                    logger.LogInformation("Running in listen-only mode (skipping installation)");
                     return await RunDeviceListenerAsync(serviceProvider, config, logger);
                 }
 
@@ -174,7 +176,23 @@ namespace AppiumBootstrapInstaller
                 logger.LogInformation("==========================================");
 
                 // ============================================
-                // ALL STEPS COMPLETED
+                // STEP 3: Start Device Listener (if enabled)
+                // ============================================
+                if (config.EnableDeviceListener)
+                {
+                    logger.LogInformation("");
+                    logger.LogInformation("==========================================");
+                    logger.LogInformation("  STEP 3/3: Starting Device Listener");
+                    logger.LogInformation("==========================================");
+                    logger.LogInformation("Device listener is enabled in configuration.");
+                    logger.LogInformation("Starting automatic device monitoring and Appium session management...");
+                    logger.LogInformation("");
+                    
+                    return await RunDeviceListenerAsync(serviceProvider, config, logger);
+                }
+
+                // ============================================
+                // ALL STEPS COMPLETED (without device listener)
                 // ============================================
                 logger.LogInformation("");
                 logger.LogInformation("==========================================");
@@ -186,22 +204,23 @@ namespace AppiumBootstrapInstaller
                 if (currentOS == ScriptExecutor.OperatingSystem.Windows)
                 {
                     logger.LogInformation("  2. Services are configured with NSSM");
-                    logger.LogInformation("  3. Run the environment setup: {InstallFolder}\\appium-env.bat", config.InstallFolder);
-                    logger.LogInformation("  4. Start Appium: {InstallFolder}\\bin\\appium.bat", config.InstallFolder);
+                    logger.LogInformation("  3. Device listener is disabled. Enable it in config.json:");
+                    logger.LogInformation("     \"EnableDeviceListener\": true");
+                    logger.LogInformation("  4. Or run manually: {InstallFolder}\\bin\\appium.bat", config.InstallFolder);
                 }
                 else if (currentOS == ScriptExecutor.OperatingSystem.MacOS)
                 {
                     logger.LogInformation("  2. Services are configured with Supervisor");
                     logger.LogInformation("  3. Source NVM: source {InstallFolder}/.nvm/nvm.sh", config.InstallFolder);
                     logger.LogInformation("  4. Use Node version: nvm use {NodeVersion}", config.NodeVersion);
-                    logger.LogInformation("  5. Start Appium: {InstallFolder}/bin/appium", config.InstallFolder);
+                    logger.LogInformation("  5. Device listener is disabled. Enable it in config.json");
                 }
                 else // Linux
                 {
                     logger.LogInformation("  2. Services are configured with systemd");
                     logger.LogInformation("  3. Source NVM: source {InstallFolder}/.nvm/nvm.sh", config.InstallFolder);
                     logger.LogInformation("  4. Use Node version: nvm use {NodeVersion}", config.NodeVersion);
-                    logger.LogInformation("  5. Start Appium: {InstallFolder}/bin/appium", config.InstallFolder);
+                    logger.LogInformation("  5. Device listener is disabled. Enable it in config.json");
                 }
 
                 return 0;
@@ -244,50 +263,44 @@ namespace AppiumBootstrapInstaller
                 logger.LogInformation("  Starting Device Listener Mode");
                 logger.LogInformation("===========================================");
 
-                var listenerConfig = config.DeviceListener ?? new DeviceListenerConfig { Enabled = true };
-
-                if (!listenerConfig.Enabled)
+                if (!config.EnableDeviceListener)
                 {
                     logger.LogWarning("Device listener is disabled in configuration");
                     return 1;
                 }
 
                 // Create device listener services
-                var registryConfig = listenerConfig.DeviceRegistry;
+                var metrics = new DeviceMetrics();
+                
                 var registry = new DeviceRegistry(
                     serviceProvider.GetRequiredService<ILogger<DeviceRegistry>>(),
-                    registryConfig
+                    config.DeviceRegistry
                 );
 
                 var sessionManager = new AppiumSessionManager(
                     serviceProvider.GetRequiredService<ILogger<AppiumSessionManager>>(),
                     config.InstallFolder,
-                    listenerConfig.PortRange
-                );
-
-                var webhookNotifier = new WebhookNotifier(
-                    serviceProvider.GetRequiredService<ILogger<WebhookNotifier>>(),
-                    listenerConfig.Webhooks
+                    config.PortRanges,
+                    metrics
                 );
 
                 var deviceListener = new DeviceListenerService(
                     serviceProvider.GetRequiredService<ILogger<DeviceListenerService>>(),
-                    listenerConfig,
+                    config,
                     config.InstallFolder,
                     registry,
                     sessionManager,
-                    webhookNotifier
+                    metrics
                 );
 
                 logger.LogInformation("Device listener configured:");
-                logger.LogInformation(\"  Install Folder: {InstallFolder}\", config.InstallFolder);
-                logger.LogInformation(\"  Poll Interval: {Interval}s\", listenerConfig.PollIntervalSeconds);
-                logger.LogInformation(\"  Auto Start Appium: {AutoStart}\", listenerConfig.AutoStartAppium);
-                logger.LogInformation(\"  Appium Port Range: {Start}-{End}\", 
-                    listenerConfig.PortRange.AppiumStart, listenerConfig.PortRange.AppiumEnd);
-                logger.LogInformation(\"  Webhooks Enabled: {Enabled}\", listenerConfig.Webhooks.Enabled);
-                logger.LogInformation(\"\");
-                logger.LogInformation(\"Press Ctrl+C to stop...\");
+                logger.LogInformation("  Install Folder: {InstallFolder}", config.InstallFolder);
+                logger.LogInformation("  Poll Interval: {Interval}s", config.DeviceListenerPollInterval);
+                logger.LogInformation("  Auto Start Appium: {AutoStart}", config.AutoStartAppium);
+                logger.LogInformation("  Appium Port Range: {Start}-{End}", 
+                    config.PortRanges.AppiumStart, config.PortRanges.AppiumEnd);
+                logger.LogInformation("");
+                logger.LogInformation("Press Ctrl+C to stop...");
 
                 // Run the service
                 var cts = new CancellationTokenSource();
@@ -295,7 +308,7 @@ namespace AppiumBootstrapInstaller
                 {
                     e.Cancel = true;
                     cts.Cancel();
-                    logger.LogInformation(\"Shutting down...\");
+                    logger.LogInformation("Shutting down...");
                 };
 
                 await deviceListener.StartAsync(cts.Token);
@@ -305,12 +318,12 @@ namespace AppiumBootstrapInstaller
             }
             catch (OperationCanceledException)
             {
-                logger.LogInformation(\"Device listener stopped\");
+                logger.LogInformation("Device listener stopped");
                 return 0;
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, \"Device listener failed\");
+                logger.LogError(ex, "Device listener failed");
                 return 1;
             }
         }
@@ -378,6 +391,12 @@ namespace AppiumBootstrapInstaller
             Console.WriteLine("USAGE:");
             Console.WriteLine("  AppiumBootstrapInstaller [options]");
             Console.WriteLine();
+            Console.WriteLine("DESCRIPTION:");
+            Console.WriteLine("  By default, this application will:");
+            Console.WriteLine("    1. Install Node.js, Appium, and configured drivers/plugins");
+            Console.WriteLine("    2. Set up the service manager (NSSM/Supervisor/systemd)");
+            Console.WriteLine("    3. Start device listener (if EnableDeviceListener: true in config)");
+            Console.WriteLine();
             Console.WriteLine("OPTIONS:");
             Console.WriteLine("  --config, -c <path>       Path to configuration file (JSON)");
             Console.WriteLine("                            If not specified, searches in:");
@@ -390,8 +409,8 @@ namespace AppiumBootstrapInstaller
             Console.WriteLine("                            Generate a sample configuration file");
             Console.WriteLine("                            Default: config.sample.json");
             Console.WriteLine();
-            Console.WriteLine("  --listen, -l              Run in device listener mode");
-            Console.WriteLine("                            Monitors devices and auto-starts Appium sessions");
+            Console.WriteLine("  --listen, -l              Skip installation and run device listener only");
+            Console.WriteLine("                            Use this if dependencies are already installed");
             Console.WriteLine();
             Console.WriteLine("  --help, -h                Show this help message");
             Console.WriteLine();
@@ -399,14 +418,14 @@ namespace AppiumBootstrapInstaller
             Console.WriteLine("  # Generate sample config");
             Console.WriteLine("  AppiumBootstrapInstaller --generate-config");
             Console.WriteLine();
-            Console.WriteLine("  # Run with custom config");
+            Console.WriteLine("  # Full setup: Install + Start device listener");
             Console.WriteLine("  AppiumBootstrapInstaller --config my-config.json");
+            Console.WriteLine();
+            Console.WriteLine("  # Run device listener only (skip installation)");
+            Console.WriteLine("  AppiumBootstrapInstaller --listen");
             Console.WriteLine();
             Console.WriteLine("  # Dry run to preview execution");
             Console.WriteLine("  AppiumBootstrapInstaller --config my-config.json --dry-run");
-            Console.WriteLine();
-            Console.WriteLine("  # Use default config location");
-            Console.WriteLine("  AppiumBootstrapInstaller");
         }
 
         static string GetPlatformScriptsPath()
