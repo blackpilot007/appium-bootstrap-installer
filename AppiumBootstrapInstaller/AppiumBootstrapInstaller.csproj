@@ -24,11 +24,6 @@
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <Link>config.sample.json</Link>
     </Content>
-    <Content Include="..\config.appium3.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-      <Link>config.appium3.json</Link>
-    </Content>
   </ItemGroup>
 
   <ItemGroup>
