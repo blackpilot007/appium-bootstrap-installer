@@ -23,8 +23,16 @@ $ErrorActionPreference = "Continue"
 # Logging functions
 function Write-Log {
     param([string]$Message, [string]$Level = "INFO")
-    # Timestamp handled by C# host logger
-    Write-Host "[$Level] $Message"
+    # Timestamp and Level (for INFO) handled by C# host logger
+    if ($Level -in "WARN", "WARNING") {
+        Write-Host "WARN: $Message"
+    }
+    elseif ($Level -in "ERR", "ERROR") {
+        Write-Host "ERROR: $Message"
+    }
+    else {
+        Write-Host "$Message"
+    }
 }
 
 function Write-Success {
@@ -39,6 +47,60 @@ function Write-ErrorMessage {
     Write-Log "================================================================" "ERR"
     Write-Log "                 $Message FAILED                                " "ERR"
     Write-Log "================================================================" "ERR"
+}
+
+# Helper: Resolve npm.cmd given a node installation path or PATH
+function Resolve-NpmPath {
+    param([string]$nodePath)
+
+    # If a direct npm.cmd next to node.exe, prefer it
+    if ($nodePath) {
+        $direct = Join-Path $nodePath 'npm.cmd'
+        if (Test-Path $direct) { return $direct }
+
+        # Search recursively under nodePath for npm.cmd (handles nested extraction layouts)
+        try {
+            $found = Get-ChildItem -Path $nodePath -Filter 'npm.cmd' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { return $found.FullName }
+        } catch {
+            # ignore
+        }
+    }
+
+    # Fall back to resolving from PATH
+    $cmd = Get-Command npm.cmd -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+
+    $cmd2 = Get-Command npm -ErrorAction SilentlyContinue
+    if ($cmd2) { return $cmd2.Source }
+
+    return $null
+}
+
+# Helper: invoke a scriptblock with retries (useful for transient EPERM / file locks)
+function Invoke-WithRetries {
+    param(
+        [scriptblock]$ScriptBlock,
+        [int]$MaxAttempts = 3,
+        [int]$DelayMs = 300
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            & $ScriptBlock
+            return $true
+        }
+        catch {
+            if ($attempt -lt $MaxAttempts) {
+                Write-Log "This is try $attempt/$MaxAttempts. Retrying after $DelayMs milliseconds." "INF"
+                Start-Sleep -Milliseconds $DelayMs
+            }
+            else {
+                Write-Log "Maximum tries of $MaxAttempts reached. Throwing error." "ERR"
+                throw
+            }
+        }
+    }
 }
 
 # Note: Admin privileges are NOT required for user-directory installations
@@ -291,9 +353,13 @@ function Install-Appium {
     # Get Node and NPM paths
     $nodePath = "$InstallFolder\nodejs"
     if ($Script:ActiveNodePath) { $nodePath = $Script:ActiveNodePath }
-    $npmPath = "$nodePath\npm.cmd"
-    
-    if (-not (Test-Path $npmPath)) {
+
+    # Ensure node path is available in this session so tools can be resolved
+    if (Test-Path "$nodePath\node.exe") { $env:Path = "$nodePath;$env:Path" }
+
+    # Resolve npm executable robustly (search node folder and PATH)
+    $npmPath = Resolve-NpmPath -nodePath $nodePath
+    if (-not $npmPath) {
         Write-Log "npm not found. Ensure Node.js is installed properly." "ERR"
         throw "npm not found"
     }
@@ -310,11 +376,11 @@ function Install-Appium {
         
         # Install Appium
         Write-Log "Running: npm install appium@$AppiumVersion --prefix $appiumHome"
-        & $npmPath install "appium@$AppiumVersion" --prefix $appiumHome --legacy-peer-deps
-        
+        Invoke-WithRetries { & $npmPath install "appium@$AppiumVersion" --prefix $appiumHome --legacy-peer-deps } -MaxAttempts 3 -DelayMs 500
+
         if ($LASTEXITCODE -ne 0) {
             Write-Log "First attempt failed, retrying with increased timeout..." "WARN"
-            & $npmPath install "appium@$AppiumVersion" --prefix $appiumHome --legacy-peer-deps --network-timeout 100000
+            Invoke-WithRetries { & $npmPath install "appium@$AppiumVersion" --prefix $appiumHome --legacy-peer-deps --network-timeout 100000 } -MaxAttempts 2 -DelayMs 800
         }
         
         Pop-Location
@@ -378,7 +444,25 @@ function Install-AppiumDriver {
     $env:APPIUM_HOME = $appiumHome
     
     # Detect Appium version
-    $appiumVersionOutput = & $appiumExe --version
+    $appiumScript = "$appiumHome\node_modules\appium\build\lib\main.js"
+    $nodePath = "$InstallFolder\nodejs"
+    if ($Script:ActiveNodePath) { $nodePath = $Script:ActiveNodePath }
+    
+    # Ensure node path exists, fallback to versioned directory if symlink not created
+    if (-not (Test-Path "$nodePath\node.exe")) {
+        Write-Log "Node.js symlink not found, checking versioned directory..." "WARN"
+        $versionedPath = Get-ChildItem -Path "$InstallFolder\nvm" -Directory -Filter "v*" | Select-Object -First 1
+        if ($versionedPath) {
+            $nodePath = $versionedPath.FullName
+            Write-Log "Using Node.js from versioned directory: $nodePath" "INF"
+        } else {
+            Write-ErrorMessage "$DriverName DRIVER INSTALLATION"
+            Write-Log "Node.js not found in expected locations." "ERR"
+            throw "Node.js installation issue"
+        }
+    }
+    
+    $appiumVersionOutput = & "$nodePath\node.exe" $appiumScript --version
     $appiumMajorVersion = $appiumVersionOutput.Split('.')[0]
     Write-Log "Detected Appium version: $appiumVersionOutput (Major: $appiumMajorVersion)"
     
@@ -387,32 +471,35 @@ function Install-AppiumDriver {
     try {
         # Uninstall existing driver
         Write-Log "Uninstalling any existing $DriverName driver..."
-        & $appiumExe driver uninstall $DriverName 2>$null
+        & "$nodePath\node.exe" $appiumScript driver uninstall $DriverName 2>$null
         
         # Install driver using appropriate command based on version
-        if ($appiumMajorVersion -eq "3") {
-            Write-Log "Using 'driver add' command for Appium 3.x"
-            Write-Log "Running: appium driver add $DriverName@$DriverVersion"
-            & $appiumExe driver add "$DriverName@$DriverVersion"
+        if ($appiumMajorVersion -ge "3") {
+            Write-Log "Using 'driver install' command for Appium $appiumMajorVersion.x"
+            Write-Log "Running: appium driver install $DriverName@$DriverVersion"
+            & "$nodePath\node.exe" $appiumScript driver install "$DriverName@$DriverVersion"
         }
         else {
             Write-Log "Using 'driver install' command for Appium 2.x"
             Write-Log "Running: appium driver install $DriverName@$DriverVersion"
-            & $appiumExe driver install "$DriverName@$DriverVersion"
+            & "$nodePath\node.exe" $appiumScript driver install "$DriverName@$DriverVersion"
         }
         
         if ($LASTEXITCODE -ne 0) {
             Write-Log "Driver installation via Appium command failed, trying npm install..." "WARN"
-            $npmPath = "$InstallFolder\nodejs\npm.cmd"
+            # Ensure node folder is on PATH for this session
+            if (Test-Path "$nodePath\node.exe") { $env:Path = "$nodePath;$env:Path" }
+            $npmPath = Resolve-NpmPath -nodePath $nodePath
+            if (-not $npmPath) { throw "npm not found for fallback installation" }
             $driverPackage = "appium-${DriverName}-driver"
             Push-Location $appiumHome
-            & $npmPath install "${driverPackage}@$DriverVersion" --save --legacy-peer-deps
+            Invoke-WithRetries { & $npmPath install "${driverPackage}@$DriverVersion" --save --legacy-peer-deps } -MaxAttempts 3 -DelayMs 400
             Pop-Location
         }
         
         # Verify driver installation
         Write-Log "Verifying $DriverName driver installation..."
-        $driverList = & $appiumExe driver list --installed
+        $driverList = & "$nodePath\node.exe" $appiumScript driver list --installed
         Write-Log $driverList
         
         if ($driverList -match $DriverName) {
@@ -454,32 +541,30 @@ function Install-LibimobileDevice {
         return
     }
     
-    Write-Log "Installing libimobiledevice using Chocolatey..."
+    Write-Log "Installing libimobiledevice using Chocolatey (best-effort, optional on Windows)..."
     
     try {
-        choco install libimobiledevice -y
+        Invoke-WithRetries { choco install libimobiledevice -y --no-progress } -MaxAttempts 3 -DelayMs 400
         
         # Refresh environment variables
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
         
-        # Verify installation
+        # Verify installation (best-effort)
         $ideviceInfoPath = Get-Command ideviceinfo -ErrorAction SilentlyContinue
         if ($ideviceInfoPath) {
             Write-Log "libimobiledevice installed successfully"
             $ideviceVersion = & ideviceinfo --version 2>&1
             Write-Log $ideviceVersion
-            Write-Success "LIBIMOBILEDEVICE INSTALLATION"
+            Write-Success "LIBIMOBILEDEVICE INSTALLATION (BEST-EFFORT)"
         }
         else {
-            Write-Log "libimobiledevice not found in PATH after installation. You may need to restart your terminal." "WARN"
+            Write-Log "libimobiledevice not found in PATH after installation. It may not be available on this system or may require a terminal restart." "WARN"
             Write-Log "Installed location is typically: C:\ProgramData\chocolatey\lib\libimobiledevice\tools" "WARN"
         }
     }
     catch {
-        Write-ErrorMessage "LIBIMOBILEDEVICE INSTALLATION"
-        Write-Log "Error: $_" "ERR"
-        Write-Log "You can manually install libimobiledevice from:" "WARN"
-        Write-Log "https://github.com/libimobiledevice-win32/imobiledevice-net" "WARN"
+        Write-Log "libimobiledevice installation via Chocolatey failed or package not found. This tool is optional on Windows; iOS automation will still work if iTunes drivers are present." "WARN"
+        Write-Log "If you need libimobiledevice, please install an appropriate tool manually for your environment." "WARN"
     }
 }
 
@@ -508,6 +593,21 @@ function Install-ITunesDrivers {
         return
     }
     
+    # Check if running as administrator
+    $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    
+    if (-not $isAdmin) {
+        Write-Log "Apple Mobile Device Support not found." "WARN"
+        Write-Log "iTunes installation requires administrator privileges." "WARN"
+        Write-Log "Since this is a user-directory installation, iOS support will be skipped." "WARN"
+        Write-Log "To enable iOS device support, run this installer as administrator or install iTunes manually." "WARN"
+        Write-Log "Manual installation options:" "WARN"
+        Write-Log "1. iTunes from Microsoft Store (recommended), OR" "WARN"
+        Write-Log "2. iTunes from Apple (https://www.apple.com/itunes/download/)" "WARN"
+        Write-Success "ITUNES DRIVERS SKIPPED (NON-ADMIN)"
+        return
+    }
+    
     Write-Log "Apple Mobile Device Support not found." "WARN"
     Write-Log "For iOS device support on Windows, you need to install:" "WARN"
     Write-Log "1. iTunes from Microsoft Store (recommended), OR" "WARN"
@@ -517,7 +617,7 @@ function Install-ITunesDrivers {
     Write-Log "Attempting to install iTunes via Chocolatey..." "INF"
     
     try {
-        choco install itunes -y
+        Invoke-WithRetries { choco install itunes -y --no-progress } -MaxAttempts 3 -DelayMs 400
         Write-Log "iTunes installation completed. Please restart your computer for drivers to take effect." "INF"
         Write-Success "ITUNES INSTALLATION"
     }
@@ -544,7 +644,25 @@ function Install-XCUITestDriver {
     $env:APPIUM_HOME = $appiumHome
     
     # Detect Appium version
-    $appiumVersionOutput = & $appiumExe --version
+    $appiumScript = "$appiumHome\node_modules\appium\build\lib\main.js"
+    $nodePath = "$InstallFolder\nodejs"
+    if ($Script:ActiveNodePath) { $nodePath = $Script:ActiveNodePath }
+    
+    # Ensure node path exists, fallback to versioned directory if symlink not created
+    if (-not (Test-Path "$nodePath\node.exe")) {
+        Write-Log "Node.js symlink not found, checking versioned directory..." "WARN"
+        $versionedPath = Get-ChildItem -Path "$InstallFolder\nvm" -Directory -Filter "v*" | Select-Object -First 1
+        if ($versionedPath) {
+            $nodePath = $versionedPath.FullName
+            Write-Log "Using Node.js from versioned directory: $nodePath" "INF"
+        } else {
+            Write-ErrorMessage "XCUITEST DRIVER INSTALLATION"
+            Write-Log "Node.js not found in expected locations." "ERR"
+            throw "Node.js installation issue"
+        }
+    }
+    
+    $appiumVersionOutput = & "$nodePath\node.exe" $appiumScript --version
     $appiumMajorVersion = $appiumVersionOutput.Split('.')[0]
     Write-Log "Detected Appium version: $appiumVersionOutput (Major: $appiumMajorVersion)"
     
@@ -553,31 +671,34 @@ function Install-XCUITestDriver {
     try {
         # Uninstall existing driver
         Write-Log "Uninstalling any existing XCUITest driver..."
-        & $appiumExe driver uninstall xcuitest 2>$null
+        & "$nodePath\node.exe" $appiumScript driver uninstall xcuitest 2>$null
         
-        # Install driver using appropriate command based on version
-        if ($appiumMajorVersion -eq "3") {
-            Write-Log "Using 'driver add' command for Appium 3.x"
-            Write-Log "Running: appium driver add xcuitest@$XCUITestVersion"
-            & $appiumExe driver add "xcuitest@$XCUITestVersion"
+        # Install driver using appropriate command (use 'driver install' for Appium 3+)
+        if ($appiumMajorVersion -ge "3") {
+            Write-Log "Using 'driver install' command for Appium $appiumMajorVersion.x"
+            Write-Log "Running: appium driver install xcuitest@$XCUITestVersion"
+            & "$nodePath\node.exe" $appiumScript driver install "xcuitest@$XCUITestVersion"
         }
         else {
             Write-Log "Using 'driver install' command for Appium 2.x"
             Write-Log "Running: appium driver install xcuitest@$XCUITestVersion"
-            & $appiumExe driver install "xcuitest@$XCUITestVersion"
+            & "$nodePath\node.exe" $appiumScript driver install "xcuitest@$XCUITestVersion"
         }
         
         if ($LASTEXITCODE -ne 0) {
             Write-Log "Plugin installation via Appium command had issues, trying npm..." "WARN"
-            $npmPath = "$InstallFolder\nodejs\npm.cmd"
+            if (Test-Path "$nodePath\node.exe") { $env:Path = "$nodePath;$env:Path" }
+            $npmPath = Resolve-NpmPath -nodePath $nodePath
+            if (-not $npmPath) { throw "npm not found for fallback installation" }
             Push-Location $appiumHome
-            & $npmPath install "appium-xcuitest-driver@$XCUITestVersion" --save --legacy-peer-deps
+            Invoke-WithRetries { & $npmPath install "appium-xcuitest-driver@$XCUITestVersion" --save --legacy-peer-deps } -MaxAttempts 3 -DelayMs 400
             Pop-Location
         }
         
         # Verify driver installation
         Write-Log "Verifying XCUITest driver installation..."
-        $driverList = & $appiumExe plugin list --installed
+        # Use driver list to enumerate installed drivers/plugins
+        $driverList = & "$nodePath\node.exe" $appiumScript driver list --installed 2>&1
         Write-Log $driverList
         
         if ($driverList -match "xcuitest") {
@@ -622,7 +743,7 @@ function Install-AndroidSDK {
     Write-Log "Installing Android SDK Platform Tools using Chocolatey..."
     
     try {
-        choco install adb -y
+        Invoke-WithRetries { choco install adb -y --no-progress } -MaxAttempts 3 -DelayMs 400
         
         # Refresh environment variables
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
@@ -748,56 +869,99 @@ function Install-DeviceFarm {
     Write-Log "Using XDG_CACHE_HOME: $env:XDG_CACHE_HOME"
     
     try {
-        # Detect Appium version
-        $appiumVersionOutput = & $appiumExe --version
+        # Detect Appium version and ensure we call Appium via node where possible
+        $nodePath = "$InstallFolder\nodejs"
+        if ($Script:ActiveNodePath) { $nodePath = $Script:ActiveNodePath }
+
+        # Ensure node path exists, fallback to versioned directory if symlink not created
+        if (-not (Test-Path "$nodePath\node.exe")) {
+            Write-Log "Node.js symlink not found, checking versioned directory..." "WARN"
+            $versionedPath = Get-ChildItem -Path "$InstallFolder\nvm" -Directory -Filter "v*" | Select-Object -First 1
+            if ($versionedPath) {
+                $nodePath = $versionedPath.FullName
+                Write-Log "Using Node.js from versioned directory: $nodePath" "INF"
+            } else {
+                Write-ErrorMessage "DEVICE FARM PLUGIN INSTALLATION"
+                Write-Log "Node.js not found in expected locations." "ERR"
+                throw "Node.js installation issue"
+            }
+        }
+
+        # Make sure node dir is on PATH for child processes that may call node internally
+        if (Test-Path "$nodePath\node.exe") { $env:Path = "$nodePath;$env:Path" }
+
+        $appiumScript = "$appiumHome\node_modules\appium\build\lib\main.js"
+        $appiumVersionOutput = & "$nodePath\node.exe" $appiumScript --version 2>&1
         $appiumMajorVersion = $appiumVersionOutput.Split('.')[0]
         Write-Log "Detected Appium version: $appiumVersionOutput (Major: $appiumMajorVersion)"
-        
+
+        # Resolve npm once for fallback use and for explicit npm installs
+        $npmPath = Resolve-NpmPath -nodePath $nodePath
+        if (-not $npmPath) { Write-Log "npm not found; plugin npm fallbacks may fail" "WARN" }
+
         $plugins = @(
             @{Name = "device-farm"; Version = "8.3.5" },
             @{Name = "appium-dashboard"; Version = "2.0.3" },
             @{Name = "inspector"; Version = "2025.3.1" }
         )
-        
+
         foreach ($plugin in $plugins) {
             $pluginName = $plugin.Name
             $pluginVersion = $plugin.Version
-            
+
             Write-Log "Installing $pluginName@$pluginVersion..."
-            
-            # Uninstall existing plugin
-            & $appiumExe plugin uninstall $pluginName 2>$null
-            
-            # Install plugin using appropriate command based on version
-            if ($appiumMajorVersion -eq "3") {
-                Write-Log "Using 'plugin add' command for Appium 3.x"
-                & $appiumExe plugin add "$pluginName@$pluginVersion"
+
+            # Uninstall existing plugin (use node + main.js to avoid relying on other wrappers)
+            try {
+                Invoke-WithRetries { & "$nodePath\node.exe" $appiumScript plugin uninstall $pluginName 2>$null } -MaxAttempts 2 -DelayMs 200
+            } catch { }
+
+            # Install plugin using appropriate command (use 'plugin install' for Appium 3+)
+            try {
+                Invoke-WithRetries { & "$nodePath\node.exe" $appiumScript plugin install "$pluginName@$pluginVersion" } -MaxAttempts 3 -DelayMs 300
             }
-            else {
-                Write-Log "Using 'plugin install' command for Appium 2.x"
-                & $appiumExe plugin install "$pluginName@$pluginVersion"
-            }
-            
-            if ($LASTEXITCODE -ne 0) {
-                Write-Log "Plugin installation via Appium command had issues, trying npm..." "WARN"
-                $npmPath = "$InstallFolder\nodejs\npm.cmd"
+            catch {
+                Write-Log "Plugin installation via Appium command had issues, trying npm fallback..." "WARN"
+                if (-not $npmPath) { $npmPath = Resolve-NpmPath -nodePath $nodePath }
+                if (-not $npmPath) { Write-Log "npm not found for plugin fallback" "ERR"; throw }
+
+                # Map plugin name to npm package name (most plugins are published as 'appium-<name>')
+                switch ($pluginName) {
+                    'device-farm' { $pluginPackage = 'appium-device-farm' }
+                    'appium-dashboard' { $pluginPackage = 'appium-dashboard' }
+                    'inspector' { $pluginPackage = 'appium-inspector' }
+                    default { $pluginPackage = "appium-$pluginName" }
+                }
+
                 Push-Location $appiumHome
-                & $npmPath install "$pluginName@$pluginVersion" --save --legacy-peer-deps
-                Pop-Location
+                try {
+                    Invoke-WithRetries { & $npmPath install "$pluginPackage@$pluginVersion" --save --legacy-peer-deps } -MaxAttempts 3 -DelayMs 400
+                }
+                finally { Pop-Location }
             }
-            
+
             Write-Log "$pluginName@$pluginVersion installed"
         }
-        
+
         # Verify plugin installations
         Write-Log "Verifying plugin installations..."
-        $pluginList = & $appiumExe plugin list --installed
-        Write-Log $pluginList
-        
+        # Prefer node+main.js for plugin listing to avoid wrapper/path issues
+        try {
+            $pluginList = & "$nodePath\node.exe" $appiumScript plugin list --installed
+            Write-Log $pluginList
+        } catch {
+            Write-Log "Failed to list plugins via node+main.js; attempting npm-based check" "WARN"
+            if ($npmPath) {
+                Push-Location $appiumHome
+                try { & $npmPath ls --depth=0 } catch {}
+                Pop-Location
+            }
+        }
+
         # Install go-ios for real device support
         Write-Log "Installing go-ios for iOS real device support..."
         Install-GoIos
-        
+
         Write-Success "DEVICE FARM PLUGIN INSTALLATION"
     }
     catch {
@@ -822,6 +986,8 @@ function Create-WrapperScripts {
     $appiumHome = "$InstallFolder\appium-home"
     $nodePath = "$InstallFolder\nodejs"
     if ($Script:ActiveNodePath) { $nodePath = $Script:ActiveNodePath }
+    # Resolve npm path so we can write it into wrapper env files
+    $npmPath = Resolve-NpmPath -nodePath $nodePath
     
     # Create appium.bat wrapper
     $appiumBatContent = @"
@@ -855,24 +1021,71 @@ SET APPIUM_HOME=$appiumHome
     Set-Content -Path "$InstallFolder\appium.bat" -Value $appiumContent
     Write-Log "Created appium.bat wrapper at $InstallFolder\appium.bat"
     
-    # appium-env.bat - Setup environment
-    $appiumEnvContent = @"
+        # appium-env.bat - Setup environment (include explicit node and npm paths)
+        $nodeExe = "";
+        $npmCmd = "";
+        if (Test-Path "$nodePath\node.exe") { $nodeExe = "$nodePath\node.exe" }
+        if ($npmPath) { $npmCmd = $npmPath }
+
+        $appiumEnvContent = @"
 @ECHO OFF
+REM Appium environment wrapper
 SET APPIUM_HOME=$appiumHome
+SET NODE_EXE=$nodeExe
+SET NPM_CMD=$npmCmd
 SET PATH=$nodePath;$binDir;%PATH%
 
 echo Appium environment activated:
 echo APPIUM_HOME=%APPIUM_HOME%
-echo NODE_VERSION=
-"$nodePath\node.exe" --version
-echo NPM_VERSION=
-"$nodePath\npm.cmd" --version
+echo NODE_EXE=%NODE_EXE%
+%NODE_EXE% --version
+echo NPM_CMD=%NPM_CMD%
+if "%NPM_CMD%"=="" (
+    npm --version
+) else (
+    "%NPM_CMD%" --version
+)
 echo APPIUM_VERSION=
-"$nodePath\node.exe" "$appiumScript" --version
+"%NODE_EXE%" "$appiumScript" --version
 "@
-    
-    Set-Content -Path "$InstallFolder\appium-env.bat" -Value $appiumEnvContent
-    Write-Log "Created appium-env.bat at $InstallFolder\appium-env.bat"
+
+        Set-Content -Path "$InstallFolder\appium-env.bat" -Value $appiumEnvContent
+        Write-Log "Created appium-env.bat at $InstallFolder\appium-env.bat"
+
+        # appium-env.sh for Unix-like shells (optional for WSL/mac)
+        # Build a bash env file using placeholders then replace them to avoid PowerShell variable expansion issues
+        $appiumEnvSh = @'
+#!/usr/bin/env bash
+export APPIUM_HOME="__APPIUMHOME__"
+export NODE_EXE="__NODEEXE__"
+export NPM_CMD="__NPMCMD__"
+export PATH="__NODEPATH__:__BINDIR__: $PATH"
+echo "Appium environment activated:"
+echo "APPIUM_HOME=$APPIUM_HOME"
+if [ -n "$NODE_EXE" ]; then
+    "$NODE_EXE" --version
+fi
+if [ -n "$NPM_CMD" ]; then
+    "$NPM_CMD" --version
+else
+    npm --version
+fi
+'@
+
+        # Replace placeholders with actual values (escape backslashes for bash where appropriate)
+        $nodePathForSh = $nodePath -replace '\\','/'
+        $binDirForSh = $binDir -replace '\\','/'
+        if ($nodeExe -eq "") { $nodeExeForSh = "" } else { $nodeExeForSh = $nodeExe -replace '\\','/' }
+        if ($npmCmd -eq "") { $npmCmdForSh = "" } else { $npmCmdForSh = $npmCmd -replace '\\','/' }
+
+        $appiumEnvSh = $appiumEnvSh -replace '__APPIUMHOME__', ($appiumHome -replace '"','\"')
+        $appiumEnvSh = $appiumEnvSh -replace '__NODEEXE__', ($nodeExeForSh)
+        $appiumEnvSh = $appiumEnvSh -replace '__NPMCMD__', ($npmCmdForSh)
+        $appiumEnvSh = $appiumEnvSh -replace '__NODEPATH__', ($nodePathForSh)
+        $appiumEnvSh = $appiumEnvSh -replace '__BINDIR__', ($binDirForSh)
+
+        Set-Content -Path "$InstallFolder\appium-env.sh" -Value $appiumEnvSh
+        Write-Log "Created appium-env.sh at $InstallFolder\appium-env.sh"
     
     Write-Success "ENVIRONMENT SCRIPTS CREATION"
 }
@@ -896,7 +1109,9 @@ function Verify-Installations {
     if ($Script:ActiveNodePath) { $nodePath = $Script:ActiveNodePath }
     if (Test-Path "$nodePath\node.exe") {
         $nodeVer = & "$nodePath\node.exe" --version
-        $npmVer = & "$nodePath\npm.cmd" --version
+        if (Test-Path "$nodePath\node.exe") { $env:Path = "$nodePath;$env:Path" }
+        $npmPath = Resolve-NpmPath -nodePath $nodePath
+        if ($npmPath) { $npmVer = & $npmPath --version } else { $npmVer = "(npm not found)" }
         Write-Log "Node.js version: $nodeVer"
         Write-Log "NPM version: $npmVer"
     }
@@ -1001,6 +1216,9 @@ try {
         Write-Log "Installing iOS support components..."
         Install-ITunesDrivers
         Install-LibimobileDevice
+    }
+
+    if ($InstallXCUITest) {
         Install-XCUITestDriver
     }
     

@@ -15,22 +15,56 @@ Write-Log "Checking Appium drivers installation..."
 Write-Log "APPIUM_HOME: $AppiumHome"
 
 $env:APPIUM_HOME = $AppiumHome
-$appiumExe = "$AppiumHome\node_modules\.bin\appium.cmd"
+# Prefer node + main.js to avoid relying on appium.cmd wrapper which requires 'node' on PATH
+$nodeExe = $null
+try {
+    $nodeExe = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
+} catch {
+    $nodeExe = $null
+}
 
-if (-not (Test-Path $appiumExe)) {
-    Write-Log "Appium not found at $appiumExe" "ERROR"
+if (-not $nodeExe) {
+    # Try locating node under a user-local nvm installation near the Appium home
+    $installFolder = Split-Path $AppiumHome -Parent
+    $nvmDir = Join-Path $installFolder "nvm"
+    if (Test-Path $nvmDir) {
+        $versioned = Get-ChildItem -Path $nvmDir -Directory -Filter "v*" | Sort-Object Name -Descending | Select-Object -First 1
+        if ($versioned) {
+            $nodeCandidate = Join-Path $versioned.FullName "node.exe"
+            if (Test-Path $nodeCandidate) { $nodeExe = $nodeCandidate }
+        }
+    }
+}
+
+$appiumCmd = Join-Path $AppiumHome "..\bin\appium.cmd"
+$appiumScript = Join-Path $AppiumHome "node_modules\appium\build\lib\main.js"
+
+if (-not $nodeExe -and -not (Test-Path $appiumCmd)) {
+    Write-Log "Appium not found (no node or wrapper found)" "ERROR"
     exit 1
 }
 
 try {
     Write-Log "Appium version:"
-    & $appiumExe --version
-    
+    if ($nodeExe -and (Test-Path $appiumScript)) {
+        & $nodeExe $appiumScript --version
+    } else {
+        & $appiumCmd --version
+    }
+
     Write-Log "`nInstalled drivers:"
-    & $appiumExe driver list --installed
-    
+    if ($nodeExe -and (Test-Path $appiumScript)) {
+        & $nodeExe $appiumScript driver list --installed
+    } else {
+        & $appiumCmd driver list --installed
+    }
+
     Write-Log "`nAvailable drivers:"
-    & $appiumExe driver list
+    if ($nodeExe -and (Test-Path $appiumScript)) {
+        & $nodeExe $appiumScript driver list
+    } else {
+        & $appiumCmd driver list
+    }
     
     Write-Log "`nDriver directories:"
     $driversPath = "$AppiumHome\node_modules"

@@ -102,6 +102,18 @@ namespace AppiumBootstrapInstaller.Services
                 {
                     return Path.GetFullPath(specifiedPath);
                 }
+                
+                // Check relative to executable directory if it's a relative path
+                if (!Path.IsPathRooted(specifiedPath))
+                {
+                    string exeDir = AppContext.BaseDirectory;
+                    string exeDirConfig = Path.Combine(exeDir, specifiedPath);
+                    if (File.Exists(exeDirConfig))
+                    {
+                        return exeDirConfig;
+                    }
+                }
+                
                 // If specified but doesn't exist, don't fall back to other locations
                 throw new FileNotFoundException($"Specified configuration file not found: {specifiedPath}");
             }

@@ -11,8 +11,16 @@ $ErrorActionPreference = "Continue"
 # Logging functions
 function Write-Log {
     param([string]$Message, [string]$Level = "INFO")
-    # Timestamp handled by C# host logger
-    Write-Host "[$Level] $Message"
+    # Timestamp and Level (for INFO) handled by C# host logger
+    if ($Level -in "WARN", "WARNING") {
+        Write-Host "WARN: $Message"
+    }
+    elseif ($Level -in "ERR", "ERROR") {
+        Write-Host "ERROR: $Message"
+    }
+    else {
+        Write-Host "$Message"
+    }
 }
 
 function Write-Success {

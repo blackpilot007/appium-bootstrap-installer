@@ -35,8 +35,47 @@ $env:APPIUM_HOME = $AppiumHomePath
 $env:PATH = "$AppiumBinPath;$AppiumHomePath\node_modules\.bin;$env:PATH"
 
 # Detect Appium version
-$AppiumVersionOutput = & "$AppiumBinPath\appium.cmd" --version 2>&1
-if ($LASTEXITCODE -eq 0) {
+# Prefer invoking Appium via explicit node + main.js to avoid relying on wrappers that need
+# "node" on PATH (non-admin installs often don't create symlinks). Fall back to appium.cmd.
+
+# Try to find node.exe on the system first
+$nodeExe = $null
+try {
+    $nodeExe = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
+} catch {
+    $nodeExe = $null
+}
+
+if (-not $nodeExe) {
+    $installFolder = Split-Path $AppiumBinPath -Parent
+    $nodeJsPath = Join-Path $installFolder "nodejs\node.exe"
+    if (Test-Path $nodeJsPath) {
+        $nodeExe = $nodeJsPath
+    } else {
+        $nvmDir = Join-Path $installFolder "nvm"
+        if (Test-Path $nvmDir) {
+            $versioned = Get-ChildItem -Path $nvmDir -Directory -Filter "v*" | Sort-Object Name -Descending | Select-Object -First 1
+            if ($versioned) {
+                $nodeExe = Join-Path $versioned.FullName "node.exe"
+            }
+        }
+    }
+}
+
+# Prepare fallback paths
+$appiumCmd = Join-Path $AppiumBinPath "appium.cmd"
+$appiumScript = Join-Path $AppiumHomePath "node_modules\appium\build\lib\main.js"
+
+# Try node+main.js first if available
+if ($nodeExe -and (Test-Path $appiumScript)) {
+    $AppiumVersionOutput = & $nodeExe $appiumScript --version 2>&1
+} elseif (Test-Path $appiumCmd) {
+    $AppiumVersionOutput = & $appiumCmd --version 2>&1
+} else {
+    $AppiumVersionOutput = ""
+}
+
+if ($AppiumVersionOutput -and $LASTEXITCODE -eq 0) {
     $AppiumVersion = $AppiumVersionOutput.Trim()
     Write-Host "Detected Appium version: $AppiumVersion" -ForegroundColor Green
 } else {
@@ -69,17 +108,23 @@ if ($DeviceFarmInstalled) {
     $XcuitestInstalled = $false
     $Uiautomator2Installed = $false
     
-    # Check driver list first
-    $DriverListOutput = & "$AppiumBinPath\appium.cmd" driver list --installed 2>&1
-    if ($LASTEXITCODE -eq 0) {
+    # Check driver list first. Prefer node+main.js if available to avoid wrapper PATH issues.
+    $DriverListOutput = ""
+    if ($nodeExe -and (Test-Path $appiumScript)) {
+        $DriverListOutput = & $nodeExe $appiumScript driver list --installed 2>&1
+    } elseif (Test-Path $appiumCmd) {
+        $DriverListOutput = & $appiumCmd driver list --installed 2>&1
+    }
+
+    if ($DriverListOutput) {
         Write-Host "Driver list output:" -ForegroundColor Gray
         Write-Host $DriverListOutput -ForegroundColor Gray
-        
+
         if ($DriverListOutput -match "xcuitest|XCUITest") {
             $XcuitestInstalled = $true
             Write-Host "✅ XCUITest driver found in driver list" -ForegroundColor Green
         }
-        
+
         if ($DriverListOutput -match "uiautomator2|UiAutomator2") {
             $Uiautomator2Installed = $true
             Write-Host "✅ UiAutomator2 driver found in driver list" -ForegroundColor Green
@@ -145,12 +190,22 @@ if ($DeviceFarmInstalled) {
 # Build Appium command
 $DefaultCapabilities = "{`"appium:wdaLocalPort`": $WdaLocalPort,`"appium:mjpegServerPort`": $MpegLocalPort}"
 
-if ($AppiumMajorVersion -eq "3") {
-    # Appium 3.x
-    $AppiumCommand = "& `"$AppiumBinPath\appium.cmd`" server -p $AppiumPort --allow-cors --allow-insecure=xcuitest:get_server_logs --default-capabilities '$DefaultCapabilities' --log-level info --log-timestamp --local-timezone --log-no-colors --use-plugins=$PluginList $PluginOptions"
+if ($nodeExe -and (Test-Path $appiumScript)) {
+    if ($AppiumMajorVersion -eq "3") {
+        # Appium 3.x via node
+        $AppiumCommand = "& `"$nodeExe`" `"$appiumScript`" server -p $AppiumPort --allow-cors --allow-insecure=xcuitest:get_server_logs --default-capabilities '$DefaultCapabilities' --log-level info --log-timestamp --local-timezone --log-no-colors --use-plugins=$PluginList $PluginOptions"
+    } else {
+        # Appium 2.x via node
+        $AppiumCommand = "& `"$nodeExe`" `"$appiumScript`" -p $AppiumPort --allow-cors --allow-insecure=get_server_logs --default-capabilities '$DefaultCapabilities' --log-level info --log-timestamp --local-timezone --log-no-colors --use-plugins=$PluginList $PluginOptions"
+    }
 } else {
-    # Appium 2.x
-    $AppiumCommand = "& `"$AppiumBinPath\appium.cmd`" -p $AppiumPort --allow-cors --allow-insecure=get_server_logs --default-capabilities '$DefaultCapabilities' --log-level info --log-timestamp --local-timezone --log-no-colors --use-plugins=$PluginList $PluginOptions"
+    if ($AppiumMajorVersion -eq "3") {
+        # Appium 3.x fallback to wrapper
+        $AppiumCommand = "& `"$AppiumBinPath\appium.cmd`" server -p $AppiumPort --allow-cors --allow-insecure=xcuitest:get_server_logs --default-capabilities '$DefaultCapabilities' --log-level info --log-timestamp --local-timezone --log-no-colors --use-plugins=$PluginList $PluginOptions"
+    } else {
+        # Appium 2.x fallback to wrapper
+        $AppiumCommand = "& `"$AppiumBinPath\appium.cmd`" -p $AppiumPort --allow-cors --allow-insecure=get_server_logs --default-capabilities '$DefaultCapabilities' --log-level info --log-timestamp --local-timezone --log-no-colors --use-plugins=$PluginList $PluginOptions"
+    }
 }
 
 Write-Host "========================================" -ForegroundColor Cyan

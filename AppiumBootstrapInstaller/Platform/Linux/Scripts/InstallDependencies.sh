@@ -282,9 +282,9 @@ install_xcuitest_driver() {
     # Use appropriate command based on version
     if [[ "$INSTALLED_APPIUM_VERSION" == 3* ]] || [ "$APPIUM_MAJOR_VERSION" = "3" ]; then
         if [ -n "$XCUITEST_VERSION" ]; then
-            appium driver add "xcuitest@${XCUITEST_VERSION}"
+            appium driver install "xcuitest@${XCUITEST_VERSION}"
         else
-            appium driver add xcuitest
+            appium driver install xcuitest
         fi
     else
         if [ -n "$XCUITEST_VERSION" ]; then
@@ -317,9 +317,9 @@ install_uiautomator2_driver() {
     # Use appropriate command based on version
     if [[ "$INSTALLED_APPIUM_VERSION" == 3* ]] || [ "$APPIUM_MAJOR_VERSION" = "3" ]; then
         if [ -n "$UIAUTOMATOR2_VERSION" ]; then
-            appium driver add "uiautomator2@${UIAUTOMATOR2_VERSION}"
+            appium driver install "uiautomator2@${UIAUTOMATOR2_VERSION}"
         else
-            appium driver add uiautomator2
+            appium driver install uiautomator2
         fi
     else
         if [ -n "$UIAUTOMATOR2_VERSION" ]; then
