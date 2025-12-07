@@ -1,0 +1,29 @@
+{
+    "installFolder": "${USERPROFILE}/appium-test",
+    "nodeVersion": "22",
+    "appiumVersion": "2.17.1",
+    "nvmVersion": "1.1.12",
+    "drivers": [
+        {
+            "name": "uiautomator2",
+            "version": "3.8.3",
+            "enabled": true
+        }
+    ],
+    "plugins": [
+        {
+            "name": "device-farm",
+            "version": "8.3.5",
+            "enabled": true
+        }
+    ],
+    "platformSpecific": {
+        "windows": {
+            "installIOSSupport": false,
+            "installAndroidSupport": true,
+            "installXCUITest": false,
+            "installUiAutomator": true,
+            "installDeviceFarm": true
+        }
+    }
+}
