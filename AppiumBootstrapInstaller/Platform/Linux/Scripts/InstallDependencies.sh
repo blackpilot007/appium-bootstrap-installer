@@ -5,6 +5,26 @@
 
 set -e  # Exit on any error
 
+# Error handling function
+handle_error() {
+    local exit_code=$?
+    local line_number=$1
+    echo ""
+    echo "================================================================"
+    echo "                   CRITICAL FAILURE DETECTED                    "
+    echo "================================================================"
+    echo "Error occurred in InstallDependencies.sh at line ${line_number}"
+    echo "Exit code: ${exit_code}"
+    echo ""
+    echo "EXECUTION STOPPED - Please review the error above and fix it"
+    echo "before proceeding."
+    echo "================================================================"
+    exit ${exit_code}
+}
+
+# Trap errors and call error handler
+trap 'handle_error ${LINENO}' ERR
+
 # Color codes for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -12,10 +32,10 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Default values
-INSTALL_FOLDER="$HOME/.appium-bootstrap"
-NODE_VERSION="20.18.1"
+INSTALL_FOLDER="$HOME/.local"
+NODE_VERSION="22"
 APPIUM_VERSION="2.17.1"
-NVM_VERSION="0.40.1"
+NVM_VERSION="0.40.2"
 XCUITEST_VERSION=""
 UIAUTOMATOR2_VERSION=""
 INSTALL_IOS_SUPPORT=false
@@ -23,6 +43,8 @@ INSTALL_ANDROID_SUPPORT=true
 INSTALL_XCUITEST="true"
 INSTALL_UIAUTOMATOR="true"
 INSTALL_DEVICE_FARM="true"
+DEVICEFARM_VERSION="8.3.5"
+DEVICEFARM_DASHBOARD_VERSION="2.0.3"
 
 # Logging functions
 log_info() {
@@ -65,6 +87,18 @@ parse_arguments() {
                 UIAUTOMATOR2_VERSION="${1#*=}"
                 shift
                 ;;
+            --install_device_farm=*)
+                INSTALL_DEVICE_FARM="${1#*=}"
+                shift
+                ;;
+            --devicefarm_version=*)
+                DEVICEFARM_VERSION="${1#*=}"
+                shift
+                ;;
+            --devicefarm_dashboard_version=*)
+                DEVICEFARM_DASHBOARD_VERSION="${1#*=}"
+                shift
+                ;;
             --install_ios_support|--install_ios_support=true)
                 INSTALL_IOS_SUPPORT=true
                 shift
@@ -92,6 +126,24 @@ parse_arguments() {
 # Check if command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
+}
+
+# Detect system architecture
+detect_architecture() {
+    ARCH="$(uname -m)"
+    log_info "Detected architecture: $ARCH"
+    
+    case "$ARCH" in
+        x86_64|amd64)
+            log_info "Running on x86_64 architecture"
+            ;;
+        aarch64|arm64)
+            log_info "Running on ARM64 architecture"
+            ;;
+        *)
+            log_warn "Unknown architecture: $ARCH"
+            ;;
+    esac
 }
 
 # Install NVM
@@ -279,19 +331,45 @@ install_xcuitest_driver() {
     INSTALLED_APPIUM_VERSION=$(appium --version 2>/dev/null || echo "unknown")
     APPIUM_MAJOR_VERSION=$(echo "$INSTALLED_APPIUM_VERSION" | cut -d'.' -f1)
     
-    # Use appropriate command based on version
-    if [[ "$INSTALLED_APPIUM_VERSION" == 3* ]] || [ "$APPIUM_MAJOR_VERSION" = "3" ]; then
-        if [ -n "$XCUITEST_VERSION" ]; then
-            appium driver install "xcuitest@${XCUITEST_VERSION}"
-        else
-            appium driver install xcuitest
+    # Use appropriate command based on version with retry logic
+    local max_retries=3
+    local retry_count=0
+    local install_success=false
+    
+    while [ $retry_count -lt $max_retries ] && [ "$install_success" = false ]; do
+        if [ $retry_count -gt 0 ]; then
+            log_warn "Retry attempt $retry_count of $((max_retries-1))..."
+            sleep 5
         fi
-    else
-        if [ -n "$XCUITEST_VERSION" ]; then
-            appium driver install "xcuitest@${XCUITEST_VERSION}"
+        
+        if [[ "$INSTALLED_APPIUM_VERSION" == 3* ]] || [ "$APPIUM_MAJOR_VERSION" = "3" ]; then
+            if [ -n "$XCUITEST_VERSION" ]; then
+                if appium driver install "xcuitest@${XCUITEST_VERSION}"; then
+                    install_success=true
+                fi
+            else
+                if appium driver install xcuitest; then
+                    install_success=true
+                fi
+            fi
         else
-            appium driver install xcuitest
+            if [ -n "$XCUITEST_VERSION" ]; then
+                if appium driver install "xcuitest@${XCUITEST_VERSION}"; then
+                    install_success=true
+                fi
+            else
+                if appium driver install xcuitest; then
+                    install_success=true
+                fi
+            fi
         fi
+        
+        retry_count=$((retry_count + 1))
+    done
+    
+    if [ "$install_success" = false ]; then
+        log_error "Failed to install XCUITest driver after $max_retries attempts"
+        return 1
     fi
     
     log_info "XCUITest driver installed successfully"
@@ -314,19 +392,45 @@ install_uiautomator2_driver() {
     INSTALLED_APPIUM_VERSION=$(appium --version 2>/dev/null || echo "unknown")
     APPIUM_MAJOR_VERSION=$(echo "$INSTALLED_APPIUM_VERSION" | cut -d'.' -f1)
     
-    # Use appropriate command based on version
-    if [[ "$INSTALLED_APPIUM_VERSION" == 3* ]] || [ "$APPIUM_MAJOR_VERSION" = "3" ]; then
-        if [ -n "$UIAUTOMATOR2_VERSION" ]; then
-            appium driver install "uiautomator2@${UIAUTOMATOR2_VERSION}"
-        else
-            appium driver install uiautomator2
+    # Use appropriate command based on version with retry logic
+    local max_retries=3
+    local retry_count=0
+    local install_success=false
+    
+    while [ $retry_count -lt $max_retries ] && [ "$install_success" = false ]; do
+        if [ $retry_count -gt 0 ]; then
+            log_warn "Retry attempt $retry_count of $((max_retries-1))..."
+            sleep 5
         fi
-    else
-        if [ -n "$UIAUTOMATOR2_VERSION" ]; then
-            appium driver install "uiautomator2@${UIAUTOMATOR2_VERSION}"
+        
+        if [[ "$INSTALLED_APPIUM_VERSION" == 3* ]] || [ "$APPIUM_MAJOR_VERSION" = "3" ]; then
+            if [ -n "$UIAUTOMATOR2_VERSION" ]; then
+                if appium driver install "uiautomator2@${UIAUTOMATOR2_VERSION}"; then
+                    install_success=true
+                fi
+            else
+                if appium driver install uiautomator2; then
+                    install_success=true
+                fi
+            fi
         else
-            appium driver install uiautomator2
+            if [ -n "$UIAUTOMATOR2_VERSION" ]; then
+                if appium driver install "uiautomator2@${UIAUTOMATOR2_VERSION}"; then
+                    install_success=true
+                fi
+            else
+                if appium driver install uiautomator2; then
+                    install_success=true
+                fi
+            fi
         fi
+        
+        retry_count=$((retry_count + 1))
+    done
+    
+    if [ "$install_success" = false ]; then
+        log_error "Failed to install UiAutomator2 driver after $max_retries attempts"
+        return 1
     fi
     
     log_info "UiAutomator2 driver installed successfully"
@@ -460,7 +564,11 @@ main() {
     log_info "NVM version: $NVM_VERSION"
     log_info "iOS support: $INSTALL_IOS_SUPPORT"
     log_info "Android support: $INSTALL_ANDROID_SUPPORT"
+    log_info "Device Farm: $INSTALL_DEVICE_FARM"
     log_info "========================================"
+    
+    # Detect architecture
+    detect_architecture
     
     # Create install folder
     mkdir -p "$INSTALL_FOLDER"
