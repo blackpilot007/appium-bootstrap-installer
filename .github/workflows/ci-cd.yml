@@ -161,11 +161,19 @@ jobs:
     - name: Get release version
       id: version
       run: |
-        if [[ $GITHUB_REF =~ refs/tags/v(.+) ]]; then
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]] && [[ -n "${{ inputs.version }}" ]]; then
+          version="${{ inputs.version }}"
+          echo "Using version from workflow input: $version"
+        elif [[ $GITHUB_REF =~ refs/tags/v(.+) ]]; then
           version="${BASH_REMATCH[1]}"
-          echo "RELEASE_VERSION=$version" >> $GITHUB_ENV
-          echo "version=$version" >> $GITHUB_OUTPUT
+          echo "Using version from tag: $version"
+        else
+          # Get version from VERSION file
+          version=$(cat publish/VERSION | tr -d '[:space:]')
+          echo "Using version from VERSION file: $version"
         fi
+        echo "RELEASE_VERSION=$version" >> $GITHUB_ENV
+        echo "version=$version" >> $GITHUB_OUTPUT
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
