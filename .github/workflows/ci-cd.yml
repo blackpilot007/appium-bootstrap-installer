@@ -76,6 +76,12 @@ jobs:
     if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || github.event_name == 'workflow_dispatch'
 
     steps:
+    - name: Debug workflow context
+      run: |
+        echo "Event name: ${{ github.event_name }}"
+        echo "Ref: ${{ github.ref }}"
+        echo "Version input: ${{ inputs.version }}"
+        
     - name: Checkout code
       uses: actions/checkout@v4
 
@@ -88,14 +94,18 @@ jobs:
     - name: Setup release version
       id: version
       run: |
-        if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch' -and $env:INPUT_VERSION) {
-          $version = $env:INPUT_VERSION
+        $inputVersion = "${{ inputs.version }}"
+        if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch' -and $inputVersion) {
+          $version = $inputVersion
+          Write-Host "Using version from workflow input: $version"
         } elseif ($env:GITHUB_REF -match 'refs/tags/v(.+)') {
           $version = $matches[1]
+          Write-Host "Using version from tag: $version"
         } else {
           # Get version from VERSION file
           $version = Get-Content "publish\VERSION" -Raw
           $version = $version.Trim()
+          Write-Host "Using version from VERSION file: $version"
         }
         echo "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
         echo "version=$version" >> $env:GITHUB_OUTPUT
