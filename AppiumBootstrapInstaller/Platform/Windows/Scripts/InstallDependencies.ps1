@@ -393,6 +393,28 @@ function Install-NodeJS {
         if (Test-Path "$nodePath\node.exe") {
             $nodeVersionOutput = & "$nodePath\node.exe" --version
             Write-Log "Node.js version installed: $nodeVersionOutput"
+            
+            # Create npm.cmd wrapper immediately if npm-cli.js exists but npm.cmd doesn't
+            $npmCmd = Join-Path $nodePath 'npm.cmd'
+            if (-not (Test-Path $npmCmd)) {
+                $npmCli = Join-Path $nodePath 'node_modules\npm\bin\npm-cli.js'
+                if (Test-Path $npmCli) {
+                    Write-Log "Creating npm.cmd wrapper for non-admin install..."
+                    try {
+                        $nodeExePath = Join-Path $nodePath 'node.exe'
+                        $wrapperContent = "@echo off`r`n`"$nodeExePath`" `"$npmCli`" %*"
+                        Set-Content -Path $npmCmd -Value $wrapperContent -Encoding ASCII -Force
+                        Write-Log "npm.cmd wrapper created at $npmCmd"
+                    }
+                    catch {
+                        Write-Log "Failed to create npm.cmd wrapper: $_" "WARN"
+                    }
+                }
+            }
+            
+            # Add node path to session PATH so npm commands work
+            $env:Path = "$nodePath;$env:Path"
+            
             Write-Success "NODE.JS INSTALLATION"
         }
         else {
@@ -845,7 +867,7 @@ function Install-GoIos {
     Write-Log "           STARTING GO-IOS INSTALLATION                         " "INF"
     Write-Log "================================================================" "INF"
     
-    $goIosVersion = "v1.0.182"
+    $goIosVersion = "v1.0.150"
     $goIosDir = "$InstallFolder\.cache\appium-device-farm\goIOS"
     $goIosBin = "$goIosDir\ios\ios.exe"
     
@@ -971,45 +993,53 @@ function Install-DeviceFarm {
         $npmPath = Resolve-NpmPath -nodePath $nodePath
         if (-not $npmPath) { Write-Log "npm not found; plugin npm fallbacks may fail" "WARN" }
 
+        # Map plugin names to npm packages (device-farm and others aren't in Appium 2.x CLI)
         $plugins = @(
-            @{Name = "device-farm"; Version = "8.3.5" },
-            @{Name = "appium-dashboard"; Version = "2.0.3" },
-            @{Name = "inspector"; Version = "2025.3.1" }
+            @{Name = "device-farm"; Package = "appium-device-farm"; Version = "8.3.5" },
+            @{Name = "appium-dashboard"; Package = "appium-dashboard"; Version = "2.0.3" },
+            @{Name = "inspector"; Package = "appium-inspector"; Version = "2025.3.1" }
         )
 
         foreach ($plugin in $plugins) {
             $pluginName = $plugin.Name
+            $pluginPackage = $plugin.Package
             $pluginVersion = $plugin.Version
 
-            Write-Log "Installing $pluginName@$pluginVersion..."
+            Write-Log "Installing $pluginName@$pluginVersion as npm package $pluginPackage..."
 
-            # Uninstall existing plugin (use node + main.js to avoid relying on other wrappers)
-                try {
-                    Invoke-WithRetries { & $nodeExe $appiumScript plugin uninstall $pluginName 2>$null } -MaxAttempts 2 -DelayMs 200
-                } catch { }
-
-                # Install plugin using appropriate command (use 'plugin install' for Appium 3+)
-                try {
-                    Invoke-WithRetries { & $nodeExe $appiumScript plugin install "$pluginName@$pluginVersion" } -MaxAttempts 3 -DelayMs 300
-                }
-            catch {
-                Write-Log "Plugin installation via Appium command had issues, trying npm fallback..." "WARN"
+            # For Appium 2.x, device-farm and related plugins must be installed via npm
+            # (they're not in the built-in plugin list)
+            if ($appiumMajorVersion -lt 3) {
+                Write-Log "Appium 2.x detected - installing $pluginName via npm directly"
                 if (-not $npmPath) { $npmPath = Resolve-NpmPath -nodePath $nodePath }
-                if (-not $npmPath) { Write-Log "npm not found for plugin fallback" "ERR"; throw }
-
-                # Map plugin name to npm package name (most plugins are published as 'appium-<name>')
-                switch ($pluginName) {
-                    'device-farm' { $pluginPackage = 'appium-device-farm' }
-                    'appium-dashboard' { $pluginPackage = 'appium-dashboard' }
-                    'inspector' { $pluginPackage = 'appium-inspector' }
-                    default { $pluginPackage = "appium-$pluginName" }
-                }
+                if (-not $npmPath) { Write-Log "npm not found for plugin installation" "ERR"; throw }
 
                 Push-Location $appiumHome
                 try {
                     Invoke-WithRetries { & $npmPath install "$pluginPackage@$pluginVersion" --save --legacy-peer-deps } -MaxAttempts 3 -DelayMs 400
                 }
                 finally { Pop-Location }
+            }
+            else {
+                # Appium 3.x - try CLI first, fallback to npm
+                try {
+                    Invoke-WithRetries { & $nodeExe $appiumScript plugin uninstall $pluginName 2>$null } -MaxAttempts 2 -DelayMs 200
+                } catch { }
+
+                try {
+                    Invoke-WithRetries { & $nodeExe $appiumScript plugin install "$pluginName@$pluginVersion" } -MaxAttempts 3 -DelayMs 300
+                }
+                catch {
+                    Write-Log "Plugin installation via Appium CLI had issues, trying npm..." "WARN"
+                    if (-not $npmPath) { $npmPath = Resolve-NpmPath -nodePath $nodePath }
+                    if (-not $npmPath) { Write-Log "npm not found for plugin fallback" "ERR"; throw }
+
+                    Push-Location $appiumHome
+                    try {
+                        Invoke-WithRetries { & $npmPath install "$pluginPackage@$pluginVersion" --save --legacy-peer-deps } -MaxAttempts 3 -DelayMs 400
+                    }
+                    finally { Pop-Location }
+                }
             }
 
             Write-Log "$pluginName@$pluginVersion installed"
@@ -1061,14 +1091,6 @@ function Create-WrapperScripts {
     # Resolve npm path so we can write it into wrapper env files
     $npmPath = Resolve-NpmPath -nodePath $nodePath
     
-    # Create appium.bat wrapper
-    $appiumBatContent = @"
-@echo off
-REM Appium wrapper script for Windows
-set APPIUM_HOME=$appiumHome
-    $nodePath = "$InstallFolder\nodejs"
-    if ($Script:ActiveNodePath) { $nodePath = $Script:ActiveNodePath }
-    
     # Determine Appium main script path
     $appiumPkgJson = "$appiumHome\node_modules\appium\package.json"
     $appiumScript = "$appiumHome\node_modules\appium\build\lib\main.js" # Default
@@ -1105,7 +1127,7 @@ REM Appium environment wrapper
 SET APPIUM_HOME=$appiumHome
 SET NODE_EXE=$nodeExe
 SET NPM_CMD=$npmCmd
-SET PATH=$nodePath;$binDir;%PATH%
+SET PATH=$InstallFolder;$nodePath;$binDir;%PATH%
 
 echo Appium environment activated:
 echo APPIUM_HOME=%APPIUM_HOME%
@@ -1119,6 +1141,8 @@ if "%NPM_CMD%"=="" (
 )
 echo APPIUM_VERSION=
 "%NODE_EXE%" "$appiumScript" --version
+echo.
+echo You can now use 'appium' command directly
 "@
 
         Set-Content -Path "$InstallFolder\appium-env.bat" -Value $appiumEnvContent
@@ -1158,6 +1182,23 @@ fi
 
         Set-Content -Path "$InstallFolder\appium-env.sh" -Value $appiumEnvSh
         Write-Log "Created appium-env.sh at $InstallFolder\appium-env.sh"
+    
+    # Add InstallFolder to User PATH so appium.bat and other wrappers are accessible
+    try {
+        $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+        if ($userPath -notlike "*$InstallFolder*") {
+            Write-Log "Adding $InstallFolder to User PATH..."
+            [Environment]::SetEnvironmentVariable("Path", "$userPath;$InstallFolder", "User")
+            $env:Path = "$InstallFolder;$env:Path"  # Update current session
+            Write-Log "Added $InstallFolder to PATH for current and future sessions"
+        } else {
+            Write-Log "InstallFolder already in User PATH"
+        }
+    }
+    catch {
+        Write-Log "Could not update User PATH (may require elevated privileges): $_" "WARN"
+        Write-Log "You can manually add $InstallFolder to your PATH or use full paths to wrappers" "WARN"
+    }
     
     Write-Success "ENVIRONMENT SCRIPTS CREATION"
 }
