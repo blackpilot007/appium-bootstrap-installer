@@ -41,6 +41,24 @@ namespace AppiumBootstrapInstaller.Models
         [JsonPropertyName("plugins")]
         public List<PluginConfig> Plugins { get; set; } = new();
 
+        [JsonPropertyName("enableDeviceListener")]
+        public bool EnableDeviceListener { get; set; } = false;
+
+        [JsonPropertyName("deviceListenerPollInterval")]
+        public int DeviceListenerPollInterval { get; set; } = 5;
+
+        [JsonPropertyName("autoStartAppium")]
+        public bool AutoStartAppium { get; set; } = true;
+
+        [JsonPropertyName("portRanges")]
+        public PortRangeConfig PortRanges { get; set; } = new();
+
+        [JsonPropertyName("webhooks")]
+        public WebhookConfig Webhooks { get; set; } = new();
+
+        [JsonPropertyName("deviceRegistry")]
+        public DeviceRegistryConfig DeviceRegistry { get; set; } = new();
+
         [JsonPropertyName("platformSpecific")]
         public PlatformSpecificConfig? PlatformSpecific { get; set; }
 

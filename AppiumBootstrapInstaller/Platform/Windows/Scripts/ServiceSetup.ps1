@@ -142,6 +142,122 @@ Start-Sleep -Seconds 60
     Write-Log "Created placeholder script at $placeholderScript"
 }
 
+# Setup Device Listener Service
+function Setup-DeviceListenerService {
+    Write-Log "================================================================" "INF"
+    Write-Log "         SETTING UP DEVICE LISTENER SERVICE                      " "INF"
+    Write-Log "================================================================" "INF"
+    
+    $serviceName = "AppiumBootstrap_DeviceListener"
+    $deviceListenerScript = "$InstallDir\Platform\Windows\Scripts\DeviceListener.ps1"
+    $nssmExe = "$nssmDir\nssm.exe"
+    
+    if (-not (Test-Path $deviceListenerScript)) {
+        Write-Log "Device listener script not found at $deviceListenerScript" "WARN"
+        Write-Log "Skipping device listener service setup" "WARN"
+        return
+    }
+    
+    if (-not (Test-Path $nssmExe)) {
+        Write-Log "NSSM not found at $nssmExe" "ERR"
+        Write-Log "Cannot setup device listener service" "ERR"
+        return
+    }
+    
+    # Check if service already exists
+    $existingService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+    if ($existingService) {
+        Write-Log "Service $serviceName already exists. Removing..." "WARN"
+        try {
+            if ($existingService.Status -eq "Running") {
+                & $nssmExe stop $serviceName
+                Start-Sleep -Seconds 2
+            }
+            & $nssmExe remove $serviceName confirm
+            Write-Log "Removed existing service"
+        }
+        catch {
+            Write-Log "Error removing existing service: $_" "ERR"
+        }
+    }
+    
+    try {
+        # Install service
+        Write-Log "Installing device listener service..."
+        
+        $powershellExe = "powershell.exe"
+        $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$deviceListenerScript`" -InstallDir `"$InstallDir`" -PollIntervalSeconds 5"
+        
+        # Install the service
+        & $nssmExe install $serviceName $powershellExe $arguments
+        
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to install service. NSSM exit code: $LASTEXITCODE"
+        }
+        
+        Write-Log "Service installed successfully"
+        
+        # Configure service
+        Write-Log "Configuring service parameters..."
+        
+        # Set display name
+        & $nssmExe set $serviceName DisplayName "Appium Bootstrap Device Listener"
+        
+        # Set description
+        & $nssmExe set $serviceName Description "Monitors Android and iOS device connections for Appium testing"
+        
+        # Set startup type to automatic
+        & $nssmExe set $serviceName Start SERVICE_AUTO_START
+        
+        # Set working directory
+        & $nssmExe set $serviceName AppDirectory "$InstallDir"
+        
+        # Set log output
+        $logDir = "$InstallDir\services\logs"
+        & $nssmExe set $serviceName AppStdout "$logDir\DeviceListener_stdout.log"
+        & $nssmExe set $serviceName AppStderr "$logDir\DeviceListener_stderr.log"
+        
+        # Set restart behavior (restart on failure)
+        & $nssmExe set $serviceName AppExit Default Restart
+        & $nssmExe set $serviceName AppRestartDelay 5000
+        
+        Write-Log "Service configuration completed"
+        
+        # Start the service
+        Write-Log "Starting device listener service..."
+        & $nssmExe start $serviceName
+        
+        if ($LASTEXITCODE -eq 0) {
+            Write-Success "DEVICE LISTENER SERVICE SETUP"
+            Write-Log ""
+            Write-Log "Service Name: $serviceName"
+            Write-Log "Service Status: Running"
+            Write-Log "Log Files:"
+            Write-Log "  - $logDir\DeviceListener_$(Get-Date -Format 'yyyyMMdd').log"
+            Write-Log "  - $logDir\DeviceListener_stdout.log"
+            Write-Log "  - $logDir\DeviceListener_stderr.log"
+            Write-Log ""
+            Write-Log "Service Management Commands:"
+            Write-Log "  Start:   nssm start $serviceName"
+            Write-Log "  Stop:    nssm stop $serviceName"
+            Write-Log "  Restart: nssm restart $serviceName"
+            Write-Log "  Status:  nssm status $serviceName"
+            Write-Log "  Remove:  nssm remove $serviceName confirm"
+        }
+        else {
+            Write-Log "Warning: Service installed but failed to start (exit code: $LASTEXITCODE)" "WARN"
+            Write-Log "You may need administrator privileges to start the service" "WARN"
+            Write-Log "Try manually: nssm start $serviceName" "WARN"
+        }
+    }
+    catch {
+        Write-ErrorMessage "DEVICE LISTENER SERVICE SETUP"
+        Write-Log "Error: $_" "ERR"
+        Write-Log "The device listener service could not be set up" "ERR"
+        Write-Log "You can manually set it up later using NSSM" "ERR"
+    }
+}
+
 # Verify NSSM setup
 function Test-NSSMSetup {
     Write-Log "================================================================" "INF"
@@ -206,6 +322,7 @@ try {
     Stop-ExistingServices
     Install-NSSM
     New-PlaceholderConfig
+    Setup-DeviceListenerService
     
     if (Test-NSSMSetup) {
         Write-Log "================================================================" "INF"

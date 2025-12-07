@@ -1348,6 +1348,24 @@ try {
     }
     
     Create-WrapperScripts
+    
+    # Setup Device Listener Service
+    Write-Log "Setting up device listener service..."
+    $serviceSetupScript = "$PSScriptRoot\ServiceSetup.ps1"
+    if (Test-Path $serviceSetupScript) {
+        try {
+            & $serviceSetupScript -InstallDir $InstallFolder
+            Write-Log "Device listener service setup completed"
+        }
+        catch {
+            Write-Log "Warning: Device listener service setup failed: $_" "WARN"
+            Write-Log "You can set it up manually later by running ServiceSetup.ps1" "WARN"
+        }
+    }
+    else {
+        Write-Log "Warning: ServiceSetup.ps1 not found at $serviceSetupScript" "WARN"
+    }
+    
     Verify-Installations
     
     Write-Log "================================================================" "INF"

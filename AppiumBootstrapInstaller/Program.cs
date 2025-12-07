@@ -26,7 +26,7 @@ namespace AppiumBootstrapInstaller
 {
     class Program
     {
-        static int Main(string[] args)
+        static async Task<int> Main(string[] args)
         {
             // Configure Serilog
             Log.Logger = new LoggerConfiguration()
@@ -95,6 +95,12 @@ namespace AppiumBootstrapInstaller
                 logger.LogInformation("  NVM Version: {NvmVersion}", config.NvmVersion);
                 logger.LogInformation("  Drivers: {DriversCount} enabled", config.Drivers.Count(d => d.Enabled));
                 logger.LogInformation("  Plugins: {PluginsCount} enabled", config.Plugins.Count(p => p.Enabled));
+
+                // Run in listen mode if requested
+                if (options.ListenMode)
+                {
+                    return await RunDeviceListenerAsync(serviceProvider, config, logger);
+                }
 
                 // Clean installation folder
                 if (!options.DryRun)
@@ -227,6 +233,88 @@ namespace AppiumBootstrapInstaller
                 new ScriptExecutor(path, provider.GetRequiredService<ILogger<ScriptExecutor>>()));
         }
 
+        private static async Task<int> RunDeviceListenerAsync(
+            IServiceProvider serviceProvider,
+            InstallConfig config,
+            ILogger<Program> logger)
+        {
+            try
+            {
+                logger.LogInformation("===========================================");
+                logger.LogInformation("  Starting Device Listener Mode");
+                logger.LogInformation("===========================================");
+
+                var listenerConfig = config.DeviceListener ?? new DeviceListenerConfig { Enabled = true };
+
+                if (!listenerConfig.Enabled)
+                {
+                    logger.LogWarning("Device listener is disabled in configuration");
+                    return 1;
+                }
+
+                // Create device listener services
+                var registryConfig = listenerConfig.DeviceRegistry;
+                var registry = new DeviceRegistry(
+                    serviceProvider.GetRequiredService<ILogger<DeviceRegistry>>(),
+                    registryConfig
+                );
+
+                var sessionManager = new AppiumSessionManager(
+                    serviceProvider.GetRequiredService<ILogger<AppiumSessionManager>>(),
+                    config.InstallFolder,
+                    listenerConfig.PortRange
+                );
+
+                var webhookNotifier = new WebhookNotifier(
+                    serviceProvider.GetRequiredService<ILogger<WebhookNotifier>>(),
+                    listenerConfig.Webhooks
+                );
+
+                var deviceListener = new DeviceListenerService(
+                    serviceProvider.GetRequiredService<ILogger<DeviceListenerService>>(),
+                    listenerConfig,
+                    config.InstallFolder,
+                    registry,
+                    sessionManager,
+                    webhookNotifier
+                );
+
+                logger.LogInformation("Device listener configured:");
+                logger.LogInformation(\"  Install Folder: {InstallFolder}\", config.InstallFolder);
+                logger.LogInformation(\"  Poll Interval: {Interval}s\", listenerConfig.PollIntervalSeconds);
+                logger.LogInformation(\"  Auto Start Appium: {AutoStart}\", listenerConfig.AutoStartAppium);
+                logger.LogInformation(\"  Appium Port Range: {Start}-{End}\", 
+                    listenerConfig.PortRange.AppiumStart, listenerConfig.PortRange.AppiumEnd);
+                logger.LogInformation(\"  Webhooks Enabled: {Enabled}\", listenerConfig.Webhooks.Enabled);
+                logger.LogInformation(\"\");
+                logger.LogInformation(\"Press Ctrl+C to stop...\");
+
+                // Run the service
+                var cts = new CancellationTokenSource();
+                Console.CancelKeyPress += (s, e) =>
+                {
+                    e.Cancel = true;
+                    cts.Cancel();
+                    logger.LogInformation(\"Shutting down...\");
+                };
+
+                await deviceListener.StartAsync(cts.Token);
+                await Task.Delay(Timeout.Infinite, cts.Token);
+
+                return 0;
+            }
+            catch (OperationCanceledException)
+            {
+                logger.LogInformation(\"Device listener stopped\");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, \"Device listener failed\");
+                return 1;
+            }
+        }
+
         static CommandLineOptions ParseArguments(string[] args)
         {
             var options = new CommandLineOptions();
@@ -269,6 +357,11 @@ namespace AppiumBootstrapInstaller
                         }
                         break;
 
+                    case "--listen":
+                    case "-l":
+                        options.ListenMode = true;
+                        break;
+
                     default:
                         Console.WriteLine($"Warning: Unknown argument '{arg}' (use --help for usage)");
                         break;
@@ -296,6 +389,9 @@ namespace AppiumBootstrapInstaller
             Console.WriteLine("  --generate-config, -g [path]");
             Console.WriteLine("                            Generate a sample configuration file");
             Console.WriteLine("                            Default: config.sample.json");
+            Console.WriteLine();
+            Console.WriteLine("  --listen, -l              Run in device listener mode");
+            Console.WriteLine("                            Monitors devices and auto-starts Appium sessions");
             Console.WriteLine();
             Console.WriteLine("  --help, -h                Show this help message");
             Console.WriteLine();
@@ -345,5 +441,6 @@ namespace AppiumBootstrapInstaller
         public string? ConfigPath { get; set; }
         public bool DryRun { get; set; }
         public bool GenerateSampleConfig { get; set; }
+        public bool ListenMode { get; set; } // New: Run in device listener mode
     }
 }
