@@ -19,6 +19,8 @@ using System.Text.Json;
 using AppiumBootstrapInstaller.Models;
 using Microsoft.Extensions.Logging;
 
+#pragma warning disable IL2026 // Members annotated with 'RequiresUnreferencedCodeAttribute' require dynamic access otherwise can break functionality when trimming application code
+
 namespace AppiumBootstrapInstaller.Services
 {
     /// <summary>
@@ -151,3 +153,5 @@ namespace AppiumBootstrapInstaller.Services
         }
     }
 }
+
+#pragma warning restore IL2026 // Members annotated with 'RequiresUnreferencedCodeAttribute' require dynamic access otherwise can break functionality when trimming application code

@@ -1073,6 +1073,74 @@ function Install-DeviceFarm {
     }
 }
 
+# Copy Platform scripts to install folder
+function Copy-PlatformScripts {
+    Write-Log "================================================================" "INF"
+    Write-Log "           COPYING PLATFORM SCRIPTS                             " "INF"
+    Write-Log "================================================================" "INF"
+    
+    $platformSourceDir = Join-Path (Split-Path $PSScriptRoot -Parent) "Platform"
+    $platformDestDir = Join-Path $InstallFolder "Platform"
+    
+    # Check if source Platform directory exists (from publish folder)
+    if (Test-Path $platformSourceDir) {
+        Write-Log "Copying Platform scripts from $platformSourceDir to $platformDestDir..."
+        
+        # Create destination directory
+        if (-not (Test-Path $platformDestDir)) {
+            New-Item -ItemType Directory -Path $platformDestDir -Force | Out-Null
+        }
+        
+        # Copy entire Platform directory structure
+        try {
+            Copy-Item -Path $platformSourceDir -Destination $InstallFolder -Recurse -Force
+            Write-Log "Platform scripts copied successfully"
+            
+            # Verify critical scripts were copied
+            $deviceListenerScript = Join-Path $platformDestDir "Windows\Scripts\DeviceListener.ps1"
+            $startAppiumScript = Join-Path $platformDestDir "Windows\Scripts\StartAppiumServer.ps1"
+            
+            if (Test-Path $deviceListenerScript) {
+                Write-Log "✓ DeviceListener.ps1 copied successfully"
+            } else {
+                Write-Log "✗ DeviceListener.ps1 not found after copy" "WARN"
+            }
+            
+            if (Test-Path $startAppiumScript) {
+                Write-Log "✓ StartAppiumServer.ps1 copied successfully"
+            } else {
+                Write-Log "✗ StartAppiumServer.ps1 not found after copy" "WARN"
+            }
+        }
+        catch {
+            Write-Log "Warning: Failed to copy Platform scripts: $_" "WARN"
+            Write-Log "Device listener may not function correctly" "WARN"
+        }
+    }
+    else {
+        Write-Log "Warning: Platform source directory not found at $platformSourceDir" "WARN"
+        Write-Log "Looking for alternative location..." "WARN"
+        
+        # Try finding Platform in the same directory as this script
+        $altPlatformSource = Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) "Platform"
+        if (Test-Path $altPlatformSource) {
+            Write-Log "Found Platform at $altPlatformSource"
+            try {
+                Copy-Item -Path $altPlatformSource -Destination $InstallFolder -Recurse -Force
+                Write-Log "Platform scripts copied from alternative location"
+            }
+            catch {
+                Write-Log "Failed to copy Platform scripts from alternative location: $_" "WARN"
+            }
+        }
+        else {
+            Write-Log "Platform scripts not found. Device listener will not be available." "WARN"
+        }
+    }
+    
+    Write-Success "PLATFORM SCRIPTS COPY"
+}
+
 # Create wrapper scripts
 function Create-WrapperScripts {
     Write-Log "================================================================" "INF"
@@ -1347,11 +1415,14 @@ try {
         Install-DeviceFarm
     }
     
+    # Copy Platform scripts before creating wrappers
+    Copy-PlatformScripts
+    
     Create-WrapperScripts
     
     # Setup Device Listener Service
     Write-Log "Setting up device listener service..."
-    $serviceSetupScript = "$PSScriptRoot\ServiceSetup.ps1"
+    $serviceSetupScript = Join-Path $InstallFolder "Platform\Windows\Scripts\ServiceSetup.ps1"
     if (Test-Path $serviceSetupScript) {
         try {
             & $serviceSetupScript -InstallDir $InstallFolder

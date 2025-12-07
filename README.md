@@ -2,6 +2,7 @@
 
 [![License](https://img.shields.io/github/license/blackpilot007/appium-bootstrap-installer)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-8.0-purple)](https://dotnet.microsoft.com/)
+[![Version](https://img.shields.io/badge/version-0.10.1-blue)](RELEASE_NOTES.md)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](https://github.com/blackpilot007/appium-bootstrap-installer)
 
 A comprehensive cross-platform automation solution that installs Appium infrastructure, monitors device connections, and automatically manages Appium server sessions—eliminating manual setup and runtime management.
@@ -21,10 +22,47 @@ A comprehensive cross-platform automation solution that installs Appium infrastr
 
 ### 1. Download
 
-Get the latest release for your platform:
-- **Windows:** [AppiumBootstrapInstaller-win-x64.zip](../../releases)
-- **macOS:** [AppiumBootstrapInstaller-osx-x64.tar.gz](../../releases) (Intel) or [osx-arm64](../../releases) (Apple Silicon)
-- **Linux:** [AppiumBootstrapInstaller-linux-x64.tar.gz](../../releases)
+**Latest Release: v0.10.1** (December 7, 2025)
+
+Download the release package:
+- **Windows:** [AppiumBootstrapInstaller-v0.10.1.zip](AppiumBootstrapInstaller-v0.10.1.zip) (9.19 MB)
+- **Cross-Platform:** Self-contained executable, no installation required
+
+**Direct Download:**
+```bash
+# Windows
+curl -L https://github.com/blackpilot007/appium-bootstrap-installer/releases/download/v0.10.1/AppiumBootstrapInstaller-v0.10.1.zip -o AppiumBootstrapInstaller-v0.10.1.zip
+unzip AppiumBootstrapInstaller-v0.10.1.zip
+```
+
+**Package Contents:**
+- `AppiumBootstrapInstaller.exe` (20.6 MB) - Self-contained Windows executable
+- Configuration files and platform scripts
+- Complete documentation and installation guides
+
+## 🎉 Published Release v0.10.1
+
+**Status:** ✅ **Production Ready** - Fully tested and released December 7, 2025
+
+### What's Included
+- **Self-contained executable** - No .NET runtime installation required
+- **Cross-platform scripts** - Standardized across Windows, macOS, Linux
+- **Comprehensive documentation** - Installation, configuration, troubleshooting
+- **Device monitoring service** - Automatically detects and manages device connections
+- **Appium session management** - Auto-starts/stops Appium servers per device
+
+### Quick Verification
+```powershell
+# Download and verify
+curl -L https://github.com/blackpilot007/appium-bootstrap-installer/releases/download/v1.1.0/AppiumBootstrapInstaller-v1.1.0.zip -o installer.zip
+unzip installer.zip
+cd AppiumBootstrapInstaller-v1.1.0
+
+# Check executable
+.\AppiumBootstrapInstaller.exe --help
+```
+
+See [RELEASE_NOTES.md](RELEASE_NOTES.md) for detailed changelog.
 
 ### 2. Configure
 
@@ -84,11 +122,33 @@ AppiumBootstrapInstaller --config dev-config.json
 ```
 
 ### CI/CD Pipeline
+
+#### Automated Build & Release
+The project includes comprehensive GitHub Actions workflows for automated building, testing, and publishing:
+
+- **CI/CD Workflow** (`.github/workflows/ci-cd.yml`):
+  - Multi-platform builds (Windows, macOS Intel/ARM64, Linux)
+  - Automated testing and artifact publishing
+  - GitHub Releases creation with proper documentation
+
+- **Package Publishing** (`.github/workflows/publish-package.yml`):
+  - NuGet package publishing to nuget.org
+  - GitHub Packages publishing for private repositories
+  - Manual trigger with version and package type selection
+
+#### GitHub Actions Example
 ```yaml
-# GitHub Actions example
+# Automated Appium setup in CI
 - name: Setup Appium
   run: |
     ./AppiumBootstrapInstaller --config ci-config.json
+
+# Manual package publishing
+- name: Publish Package
+  uses: ./.github/workflows/publish-package.yml
+  with:
+    package_version: '0.10.1'
+    package_type: 'nuget'  # or 'github'
 ```
 
 ### Device Farm
