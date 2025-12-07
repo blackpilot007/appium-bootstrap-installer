@@ -1,0 +1,44 @@
+{
+    "installFolder": "${USERPROFILE}/AppiumBootstrap",
+    "nodeVersion": "22",
+    "appiumVersion": "3.0.0",
+    "nvmVersion": "1.1.12",
+    "drivers": [
+        {
+            "name": "xcuitest",
+            "version": "latest",
+            "enabled": true
+        },
+        {
+            "name": "uiautomator2",
+            "version": "latest",
+            "enabled": true
+        }
+    ],
+    "plugins": [
+        {
+            "name": "device-farm",
+            "version": "latest",
+            "enabled": true
+        },
+        {
+            "name": "appium-dashboard",
+            "version": "latest",
+            "enabled": true
+        }
+    ],
+    "platformSpecific": {
+        "macOS": {
+            "libimobiledeviceVersion": "latest"
+        },
+        "windows": {
+            "installIOSSupport": true,
+            "installAndroidSupport": true,
+            "nvmVersion": "1.1.12"
+        },
+        "linux": {
+            "installIOSSupport": true,
+            "installAndroidSupport": true
+        }
+    }
+}

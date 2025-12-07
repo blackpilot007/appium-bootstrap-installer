@@ -1,0 +1,20 @@
+# Systemd service template for iOS port forwarding
+# This file should be copied to ~/.config/systemd/user/ with appropriate naming
+# Example: portforward_<UDID>.service
+
+[Unit]
+Description=iOS Port Forward for device %i
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.appium-bootstrap
+ExecStart=%h/.appium-bootstrap/systemd/services/portforward.sh <UDID> 8100 8100
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+
+[Install]
+WantedBy=default.target

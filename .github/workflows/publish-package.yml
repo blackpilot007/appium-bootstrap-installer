@@ -1,0 +1,86 @@
+name: Publish Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_version:
+        description: 'Package version (e.g., 0.10.1)'
+        required: true
+        default: '0.10.1'
+      package_type:
+        description: 'Package type'
+        required: true
+        default: 'nuget'
+        type: choice
+        options:
+        - nuget
+        - github
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  SOLUTION_FILE: 'AppiumBootstrapInstaller.sln'
+  PROJECT_FILE: 'AppiumBootstrapInstaller/AppiumBootstrapInstaller.csproj'
+  BUILD_CONFIGURATION: 'Release'
+
+jobs:
+  publish-nuget:
+    name: Publish to NuGet
+    runs-on: windows-latest
+    if: github.event.inputs.package_type == 'nuget'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Restore dependencies
+      run: dotnet restore ${{ env.SOLUTION_FILE }}
+
+    - name: Build solution
+      run: dotnet build ${{ env.SOLUTION_FILE }} --configuration ${{ env.BUILD_CONFIGURATION }} --no-restore
+
+    - name: Run tests
+      run: dotnet test ${{ env.SOLUTION_FILE }} --configuration ${{ env.BUILD_CONFIGURATION }} --no-build --verbosity minimal
+
+    - name: Pack NuGet package
+      run: dotnet pack ${{ env.PROJECT_FILE }} --configuration ${{ env.BUILD_CONFIGURATION }} --no-build --output ./nupkg /p:Version=${{ github.event.inputs.package_version }}
+
+    - name: Publish to NuGet
+      run: dotnet nuget push ./nupkg/*.nupkg --source https://api.nuget.org/v3/index.json --api-key ${{ secrets.NUGET_API_KEY }} --skip-duplicate
+
+  publish-github:
+    name: Publish to GitHub Packages
+    runs-on: windows-latest
+    if: github.event.inputs.package_type == 'github'
+
+    permissions:
+      packages: write
+      contents: read
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Restore dependencies
+      run: dotnet restore ${{ env.SOLUTION_FILE }}
+
+    - name: Build solution
+      run: dotnet build ${{ env.SOLUTION_FILE }} --configuration ${{ env.BUILD_CONFIGURATION }} --no-restore
+
+    - name: Run tests
+      run: dotnet test ${{ env.SOLUTION_FILE }} --configuration ${{ env.BUILD_CONFIGURATION }} --no-build --verbosity minimal
+
+    - name: Pack NuGet package
+      run: dotnet pack ${{ env.PROJECT_FILE }} --configuration ${{ env.BUILD_CONFIGURATION }} --no-build --output ./nupkg /p:Version=${{ github.event.inputs.package_version }}
+
+    - name: Publish to GitHub Packages
+      run: dotnet nuget push ./nupkg/*.nupkg --source https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json --api-key ${{ secrets.GITHUB_TOKEN }} --skip-duplicate

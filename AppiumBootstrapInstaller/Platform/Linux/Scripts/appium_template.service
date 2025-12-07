@@ -1,0 +1,22 @@
+# Systemd service template for Appium
+# This file should be copied to ~/.config/systemd/user/ with appropriate naming
+# Example: appium_4723.service
+
+[Unit]
+Description=Appium Server (Port %i)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.appium-bootstrap
+ExecStart=%h/.appium-bootstrap/systemd/services/appium.sh 4723 8100 9100
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+Environment="PATH=%h/.nvm/versions/node/default/bin:%h/.appium-bootstrap/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="APPIUM_HOME=%h/.appium-bootstrap/appium-home"
+Environment="NVM_DIR=%h/.nvm"
+
+[Install]
+WantedBy=default.target
