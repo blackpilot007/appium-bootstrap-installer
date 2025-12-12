@@ -87,17 +87,13 @@ namespace AppiumBootstrapInstaller.Services
             await _saveLock.WaitAsync();
             try
             {
-                var data = new
+                var data = new DeviceRegistryData
                 {
                     LastUpdated = DateTime.UtcNow,
                     Devices = _devices.Values.ToList()
                 };
-
-                var json = JsonSerializer.Serialize(data, new JsonSerializerOptions
-                {
-                    WriteIndented = true,
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-                });
+                
+                var json = JsonSerializer.Serialize(data, AppJsonSerializerContext.Default.DeviceRegistryData);
 
                 await File.WriteAllTextAsync(_config.FilePath, json);
                 _logger.LogDebug("Device registry saved to {FilePath}", _config.FilePath);
@@ -125,19 +121,15 @@ namespace AppiumBootstrapInstaller.Services
             try
             {
                 var json = File.ReadAllText(_config.FilePath);
-                var data = JsonSerializer.Deserialize<JsonElement>(json);
+                var data = JsonSerializer.Deserialize(json, AppJsonSerializerContext.Default.DeviceRegistryData);
 
-                if (data.TryGetProperty("devices", out var devicesArray))
+                if (data?.Devices != null)
                 {
-                    var devices = JsonSerializer.Deserialize<List<Device>>(devicesArray.GetRawText());
-                    if (devices != null)
+                    foreach (var device in data.Devices)
                     {
-                        foreach (var device in devices)
-                        {
-                            _devices.TryAdd(device.Id, device);
-                        }
-                        _logger.LogInformation("Loaded {Count} devices from registry", devices.Count);
+                        _devices.TryAdd(device.Id, device);
                     }
+                    _logger.LogInformation("Loaded {Count} devices from registry", data.Devices.Count);
                 }
             }
             catch (Exception ex)
