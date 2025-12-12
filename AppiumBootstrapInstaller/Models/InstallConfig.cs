@@ -50,6 +50,9 @@ namespace AppiumBootstrapInstaller.Models
         [JsonPropertyName("autoStartAppium")]
         public bool AutoStartAppium { get; set; } = true;
 
+        [JsonPropertyName("cleanInstallFolder")]
+        public bool CleanInstallFolder { get; set; } = false;
+
         [JsonPropertyName("portRanges")]
         public PortRangeConfig PortRanges { get; set; } = new();
 
@@ -175,11 +178,5 @@ namespace AppiumBootstrapInstaller.Models
 
         [JsonPropertyName("nvmVersion")]
         public string? NvmVersion { get; set; }
-    }
-
-    [JsonSerializable(typeof(InstallConfig))]
-    [JsonSourceGenerationOptions(WriteIndented = true, PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
-    public partial class AppJsonSerializerContext : JsonSerializerContext
-    {
     }
 }
