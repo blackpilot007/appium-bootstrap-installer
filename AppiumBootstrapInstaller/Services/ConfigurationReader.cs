@@ -188,13 +188,6 @@ namespace AppiumBootstrapInstaller.Services
             {
                 string varName = match.Groups[1].Value;
                 string? value = Environment.GetEnvironmentVariable(varName);
-
-                // Special handling for HOME on Windows if not set
-                if (value == null && varName == "HOME" && OperatingSystem.IsWindows())
-                {
-                    value = Environment.GetEnvironmentVariable("USERPROFILE");
-                }
-
                 return value ?? match.Value;
             });
 
@@ -208,10 +201,11 @@ namespace AppiumBootstrapInstaller.Services
         {
             var sampleConfig = new InstallConfig
             {
-                InstallFolder = "${USERPROFILE}/AppiumBootstrap",
+                InstallFolder = "${HOME}/AppiumBootstrap",
                 NodeVersion = "22",
                 AppiumVersion = "2.17.1",
                 NvmVersion = "0.40.2",
+                CleanInstallFolder = false,
                 Drivers = new List<DriverConfig>
                 {
                     new DriverConfig { Name = "xcuitest", Version = "7.24.3", Enabled = true },
