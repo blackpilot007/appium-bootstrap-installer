@@ -146,7 +146,29 @@ parse_arguments() {
     fi
     
     # Ensure the install folder exists
-    mkdir -p "$INSTALL_FOLDER"
+    if [ ! -d "$INSTALL_FOLDER" ]; then
+        if ! mkdir -p "$INSTALL_FOLDER" 2>/dev/null; then
+            echo "================================================================"
+            echo "                 PERMISSION DENIED                              "
+            echo "================================================================"
+            echo "Cannot create installation folder: $INSTALL_FOLDER"
+            echo ""
+            echo "Please choose one of the following options:"
+            echo ""
+            echo "  Option 1 (Recommended): Use a shared folder"
+            echo "    --install_folder=\"/Users/Shared/AppiumBootstrap\""
+            echo ""
+            echo "  Option 2: Run the installer with sudo"
+            echo "    sudo ./AppiumBootstrapInstaller"
+            echo ""
+            echo "  Option 3: Create the folder manually first"
+            echo "    sudo mkdir -p $INSTALL_FOLDER"
+            echo "    sudo chown -R \$(whoami) $INSTALL_FOLDER"
+            echo ""
+            echo "================================================================"
+            exit 1
+        fi
+    fi
 }
 
 # Check the success of the last command and display formatted message
@@ -1235,8 +1257,13 @@ install_libimobiledevice() {
     echo "          STARTING LIBIMOBILEDEVICE INSTALLATION                "
     echo "================================================================"
     
-    # Default version - empty string means latest
+    # Default version - empty string or "latest" means latest available
     local LIBIMOBILEDEVICE_VERSION=${LIBIMOBILEDEVICE_VERSION:-""}
+    
+    # Treat "latest" as empty (no version specified)
+    if [ "$LIBIMOBILEDEVICE_VERSION" = "latest" ]; then
+        LIBIMOBILEDEVICE_VERSION=""
+    fi
     
     echo "Installing libimobiledevice using Homebrew..."
     
@@ -1254,10 +1281,31 @@ install_libimobiledevice() {
         local installed_version=$($BREW_CMD list --versions libimobiledevice | awk '{print $2}')
         echo "libimobiledevice is already installed (version $installed_version)."
         
+        # If no specific version is requested, just ensure it's up to date
+        if [ -z "$LIBIMOBILEDEVICE_VERSION" ]; then
+            echo "No specific version requested. Checking for upgrades..."
+            $BREW_CMD upgrade libimobiledevice 2>/dev/null || echo "libimobiledevice is already up-to-date or upgrade not needed."
+            if [[ ":$PATH:" != *":$HOMEBREW_PREFIX/bin:"* ]]; then
+                export PATH="$HOMEBREW_PREFIX/bin:$PATH"
+            fi
+            return 0
+        fi
+        
         # If specific version is requested and different from installed, reinstall
-        if [ -n "$LIBIMOBILEDEVICE_VERSION" ] && [ "$installed_version" != "$LIBIMOBILEDEVICE_VERSION" ]; then
+        if [ "$installed_version" != "$LIBIMOBILEDEVICE_VERSION" ]; then
             echo "Requested version $LIBIMOBILEDEVICE_VERSION differs from installed $installed_version. Reinstalling..."
-            $BREW_CMD uninstall libimobiledevice
+            
+            # Check for dependents before attempting uninstall
+            local dependents=$($BREW_CMD uses --installed libimobiledevice 2>/dev/null | grep -v "^libimobiledevice$" || true)
+            
+            if [ -n "$dependents" ]; then
+                echo "Warning: The following packages depend on libimobiledevice:"
+                echo "$dependents"
+                echo "Uninstalling libimobiledevice and ignoring dependencies..."
+                $BREW_CMD uninstall --ignore-dependencies libimobiledevice
+            else
+                $BREW_CMD uninstall libimobiledevice
+            fi
         else
             # Already installed with correct version
             echo "Using existing libimobiledevice installation."

@@ -445,16 +445,45 @@ install_libimobiledevice() {
     
     log_info "Installing libimobiledevice for iOS device support..."
     
-    # Detect package manager
+    # Check if already installed
+    if command_exists ideviceinfo; then
+        local installed_version=$(ideviceinfo --version 2>&1 | head -n 1 | grep -oP '\d+\.\d+\.\d+' || echo "unknown")
+        log_info "libimobiledevice is already installed (version: $installed_version)"
+        log_info "Ensuring it's up to date..."
+    fi
+    
+    # Detect package manager and install/upgrade
     if command_exists apt-get; then
         sudo apt-get update
-        sudo apt-get install -y libimobiledevice-utils usbmuxd
+        if command_exists ideviceinfo; then
+            # Already installed, upgrade if needed
+            sudo apt-get install --only-upgrade -y libimobiledevice-utils usbmuxd 2>/dev/null || \
+                log_info "libimobiledevice is already at the latest version"
+        else
+            # Not installed, install it
+            sudo apt-get install -y libimobiledevice-utils usbmuxd
+        fi
     elif command_exists dnf; then
-        sudo dnf install -y libimobiledevice-utils
+        if command_exists ideviceinfo; then
+            sudo dnf upgrade -y libimobiledevice-utils 2>/dev/null || \
+                log_info "libimobiledevice is already at the latest version"
+        else
+            sudo dnf install -y libimobiledevice-utils
+        fi
     elif command_exists yum; then
-        sudo yum install -y libimobiledevice-utils
+        if command_exists ideviceinfo; then
+            sudo yum update -y libimobiledevice-utils 2>/dev/null || \
+                log_info "libimobiledevice is already at the latest version"
+        else
+            sudo yum install -y libimobiledevice-utils
+        fi
     elif command_exists pacman; then
-        sudo pacman -S --noconfirm libimobiledevice usbmuxd
+        if command_exists ideviceinfo; then
+            sudo pacman -Syu --noconfirm libimobiledevice usbmuxd 2>/dev/null || \
+                log_info "libimobiledevice is already at the latest version"
+        else
+            sudo pacman -S --noconfirm libimobiledevice usbmuxd
+        fi
     else
         log_warn "Could not detect package manager. Please install libimobiledevice manually."
         return 1

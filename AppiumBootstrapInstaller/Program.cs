@@ -29,12 +29,13 @@ namespace AppiumBootstrapInstaller
     {
         static async Task<int> Main(string[] args)
         {
-            // Configure Serilog
+            // Configure Serilog with plain console output (no colors for better readability)
             Log.Logger = new LoggerConfiguration()
                 .MinimumLevel.Debug()
                 .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
                 .Enrich.FromLogContext()
-                .WriteTo.Console()
+                .WriteTo.Console(
+                    outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
                 .WriteTo.File("logs/installer-.log", rollingInterval: RollingInterval.Day)
                 .CreateLogger();
 
@@ -104,11 +105,15 @@ namespace AppiumBootstrapInstaller
                     return await RunDeviceListenerAsync(serviceProvider, config, logger);
                 }
 
-                // Clean installation folder
-                if (!options.DryRun)
+                // Clean installation folder before starting (if configured)
+                if (!options.DryRun && config.CleanInstallFolder)
                 {
                     logger.LogInformation("Cleaning installation folder before starting...");
                     executor.CleanInstallationFolder(config.InstallFolder);
+                }
+                else if (!options.DryRun)
+                {
+                    logger.LogInformation("Preserving existing installation folder (cleanInstallFolder: false)");
                 }
 
                 // Get script path
