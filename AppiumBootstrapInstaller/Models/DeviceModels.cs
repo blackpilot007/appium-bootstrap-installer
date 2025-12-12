@@ -19,6 +19,18 @@ using System.Text.Json.Serialization;
 namespace AppiumBootstrapInstaller.Models
 {
     /// <summary>
+    /// Device registry data model for serialization
+    /// </summary>
+    public class DeviceRegistryData
+    {
+        [JsonPropertyName("lastUpdated")]
+        public DateTime LastUpdated { get; set; }
+
+        [JsonPropertyName("devices")]
+        public List<Device> Devices { get; set; } = new();
+    }
+
+    /// <summary>
     /// Represents a connected device (Android or iOS)
     /// </summary>
     public class Device
