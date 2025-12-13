@@ -277,6 +277,15 @@ function Install-FNM {
         $env:FNM_DIR = $fnmPath
         $env:Path = "$fnmPath;$env:Path"
         
+        # Initialize fnm environment immediately after install
+        try {
+            $fnmEnv = & $fnmExe env --shell powershell
+            $fnmEnv | Invoke-Expression
+        }
+        catch {
+            Write-Log "Could not initialize fnm env during install: $_" "WARN"
+        }
+        
         # Clean up
         if (Test-Path $fnmZipPath) {
             Remove-Item -Path $fnmZipPath -Force -ErrorAction SilentlyContinue
@@ -326,7 +335,17 @@ function Install-NodeJS {
     
     if ($nodeInstalled) {
         Write-Log "Node.js version $NodeVersion is already installed"
-        & $fnmExe use $NodeVersion
+        try {
+            & $fnmExe use $NodeVersion
+        }
+        catch {
+            $errorMsg = $_.Exception.Message
+            Write-Log "Could not switch to Node.js ${NodeVersion}: $errorMsg" "WARN"
+            # Try re-initializing env if it failed
+            $fnmEnv = & $fnmExe env --shell powershell
+            $fnmEnv | Invoke-Expression
+            & $fnmExe use $NodeVersion
+        }
         Write-Success "NODE.JS ALREADY INSTALLED"
         return
     }
