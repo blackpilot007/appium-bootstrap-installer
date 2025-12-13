@@ -13,33 +13,73 @@
             "name": "uiautomator2",
             "version": "3.8.3",
             "enabled": true
+        },
+        {
+            "name": "espresso",
+            "version": "2.44.0",
+            "enabled": false,
+            "_comment": "Espresso driver for Android native app testing"
+        },
+        {
+            "name": "flutter",
+            "version": "2.8.1",
+            "enabled": false,
+            "_comment": "Flutter driver for Flutter app testing"
+        },
+        {
+            "name": "safari",
+            "version": "3.7.3",
+            "enabled": false,
+            "_comment": "Safari driver for iOS web testing"
+        },
+        {
+            "name": "gecko",
+            "version": "0.33.0",
+            "enabled": false,
+            "_comment": "Gecko driver for Firefox testing on Android"
         }
     ],
     "plugins": [
         {
-            "name": "device-farm",
+            "name": "appium-device-farm",
             "version": "8.3.5",
-            "enabled": true
+            "enabled": true,
+            "_comment": "Device farm plugin for managing device pools and parallel testing"
         },
         {
             "name": "appium-dashboard",
             "version": "2.0.3",
             "enabled": true
+        },
+        {
+            "name": "images",
+            "version": "2.1.7",
+            "enabled": false,
+            "_comment": "Image comparison plugin for visual testing"
+        },
+        {
+            "name": "relaxed-caps",
+            "version": "2.0.0",
+            "enabled": false,
+            "_comment": "Relaxed capabilities plugin to allow non-standard caps"
+        },
+        {
+            "name": "element-wait",
+            "version": "3.0.2",
+            "enabled": false,
+            "_comment": "Element wait plugin for improved element waiting strategies"
+        },
+        {
+            "name": "execute-driver",
+            "version": "2.1.4",
+            "enabled": false,
+            "_comment": "Execute driver plugin for running custom driver commands"
         }
     ],
     "enableDeviceListener": false,
     "deviceListenerPollInterval": 5,
     "autoStartAppium": true,
-    "portRanges": {
-        "appiumStart": 4723,
-        "appiumEnd": 4823,
-        "wdaStart": 8100,
-        "wdaEnd": 8200,
-        "mjpegStart": 9100,
-        "mjpegEnd": 9200,
-        "systemPortStart": 8200,
-        "systemPortEnd": 8300
-    },
+    "prebuiltWdaPath": "", /* Optional: path or URL to a signed/prebuilt WebDriverAgent bundle (macOS host). \n                                 When set, the installer will export this as environment variable APPIUM_PREBUILT_WDA for Appium. \n                                 On Windows and Linux, iOS Appium sessions will NOT be auto-started unless this is provided. */
     "deviceRegistry": {
         "enabled": true,
         "filePath": "device-registry.json",
@@ -52,11 +92,13 @@
         },
         "windows": {
             "installIOSSupport": true,
+            "_comment_installIOSSupport": "Optional: Auto-enabled when xcuitest/safari/mac2 drivers detected. Set true to force install libimobiledevice/iTunes drivers",
             "installAndroidSupport": true,
             "nvmVersion": "1.1.12"
         },
         "linux": {
             "installIOSSupport": true,
+            "_comment_installIOSSupport": "Optional: Auto-enabled when xcuitest/safari/mac2 drivers detected. Set true to force install libimobiledevice/go-ios",
             "installAndroidSupport": true
         }
     }

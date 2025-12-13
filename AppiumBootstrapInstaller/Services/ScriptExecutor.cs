@@ -17,6 +17,8 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
+using System.Text.Json;
 using AppiumBootstrapInstaller.Models;
 using Microsoft.Extensions.Logging;
 
@@ -130,32 +132,30 @@ namespace AppiumBootstrapInstaller.Services
         {
             var args = new List<string>();
 
-            // Common arguments for all platforms
+            // Serialize enabled drivers and plugins to JSON for passing to scripts
+            var enabledDrivers = config.Drivers.Where(d => d.Enabled).ToList();
+            var enabledPlugins = config.Plugins.Where(p => p.Enabled).ToList();
+            
+            // Use source generator context for Native AOT compatibility
+            string driversJson = JsonSerializer.Serialize(enabledDrivers, AppJsonSerializerContext.Default.ListDriverConfig);
+            string pluginsJson = JsonSerializer.Serialize(enabledPlugins, AppJsonSerializerContext.Default.ListPluginConfig);
+
             if (os == OperatingSystem.Windows)
             {
-                // Determine NVM version (prefer platform-specific, fallback to root)
-                string nvmVersion = config.PlatformSpecific?.Windows?.NvmVersion ?? config.NvmVersion;
-
+                // Windows now uses nvm-windows (portable, no-install) - no version needed, fetches latest automatically
+                string goIosVersion = config.PlatformSpecific?.Windows?.GoIosVersion ?? "v1.0.189";
 
                 // PowerShell parameters
                 args.Add($"-InstallFolder \"{config.InstallFolder}\"");
                 args.Add($"-NodeVersion \"{config.NodeVersion}\"");
                 args.Add($"-AppiumVersion \"{config.AppiumVersion}\"");
-                args.Add($"-NvmVersion \"{nvmVersion}\"");
-
-                // Drivers
-                var xcuitestDriver = config.Drivers.FirstOrDefault(d => d.Name.Equals("xcuitest", StringComparison.OrdinalIgnoreCase));
-                var uiautomator2Driver = config.Drivers.FirstOrDefault(d => d.Name.Equals("uiautomator2", StringComparison.OrdinalIgnoreCase));
-
-                if (xcuitestDriver != null && !string.IsNullOrEmpty(xcuitestDriver.Version))
-                {
-                    args.Add($"-XCUITestVersion \"{xcuitestDriver.Version}\"");
-                }
-
-                if (uiautomator2Driver != null && !string.IsNullOrEmpty(uiautomator2Driver.Version))
-                {
-                    args.Add($"-DriverVersion \"{uiautomator2Driver.Version}\"");
-                }
+                args.Add($"-GoIosVersion \"{goIosVersion}\"");
+                
+                // Pass drivers and plugins as Base64-encoded JSON to avoid escaping issues
+                string driversBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(driversJson));
+                string pluginsBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(pluginsJson));
+                args.Add($"-DriversJson \"{driversBase64}\"");
+                args.Add($"-PluginsJson \"{pluginsBase64}\"");
 
                 // Platform-specific settings
                 if (config.PlatformSpecific?.Windows != null)
@@ -166,17 +166,6 @@ namespace AppiumBootstrapInstaller.Services
                     if (!winConfig.InstallAndroidSupport)
                         args.Add("-InstallAndroidSupport:$false");
                 }
-
-                // Driver installation flags based on enabled status
-                if (xcuitestDriver != null && !xcuitestDriver.Enabled)
-                    args.Add("-InstallXCUITest:$false");
-                if (uiautomator2Driver != null && !uiautomator2Driver.Enabled)
-                    args.Add("-InstallUiAutomator:$false");
-
-                // Plugin installation flags based on enabled status
-                var deviceFarmPlugin = config.Plugins.FirstOrDefault(p => p.Name.Equals("device-farm", StringComparison.OrdinalIgnoreCase));
-                if (deviceFarmPlugin != null && !deviceFarmPlugin.Enabled)
-                    args.Add("-InstallDeviceFarm:$false");
             }
             else // macOS and Linux use bash-style arguments
             {
@@ -196,20 +185,12 @@ namespace AppiumBootstrapInstaller.Services
                 args.Add($"--node_version=\"{config.NodeVersion}\"");
                 args.Add($"--appium_version=\"{config.AppiumVersion}\"");
                 args.Add($"--nvm_version=\"{nvmVersion}\"");
-
-                // Drivers
-                var xcuitestDriver = config.Drivers.FirstOrDefault(d => d.Name.Equals("xcuitest", StringComparison.OrdinalIgnoreCase));
-                var uiautomator2Driver = config.Drivers.FirstOrDefault(d => d.Name.Equals("uiautomator2", StringComparison.OrdinalIgnoreCase));
-
-                if (xcuitestDriver != null && !string.IsNullOrEmpty(xcuitestDriver.Version))
-                {
-                    args.Add($"--xcuitest_version=\"{xcuitestDriver.Version}\"");
-                }
-
-                if (uiautomator2Driver != null && !string.IsNullOrEmpty(uiautomator2Driver.Version))
-                {
-                    args.Add($"--uiautomator2_version=\"{uiautomator2Driver.Version}\"");
-                }
+                
+                // Pass drivers and plugins as JSON (escape single quotes for bash)
+                string escapedDriversJson = driversJson.Replace("'", "'\\''");
+                string escapedPluginsJson = pluginsJson.Replace("'", "'\\''");
+                args.Add($"--drivers_json='{escapedDriversJson}'");
+                args.Add($"--plugins_json='{escapedPluginsJson}'");
 
                 // Platform-specific settings for macOS
                 if (os == OperatingSystem.MacOS && config.PlatformSpecific?.MacOS != null)
@@ -219,18 +200,11 @@ namespace AppiumBootstrapInstaller.Services
                     {
                         args.Add($"--libimobiledevice_version=\"{macConfig.LibimobiledeviceVersion}\"");
                     }
+                    if (!string.IsNullOrEmpty(macConfig.GoIosVersion))
+                    {
+                        args.Add($"--go_ios_version=\"{macConfig.GoIosVersion}\"");
+                    }
                 }
-
-                // Driver installation flags based on enabled status (macOS/Linux)
-                if (xcuitestDriver != null && !xcuitestDriver.Enabled)
-                    args.Add("--install_xcuitest=false");
-                if (uiautomator2Driver != null && !uiautomator2Driver.Enabled)
-                    args.Add("--install_uiautomator=false");
-
-                // Plugin installation flags based on enabled status (macOS/Linux)
-                var deviceFarmPlugin = config.Plugins.FirstOrDefault(p => p.Name.Equals("device-farm", StringComparison.OrdinalIgnoreCase));
-                if (deviceFarmPlugin != null && !deviceFarmPlugin.Enabled)
-                    args.Add("--install_device_farm=false");
 
                 // Platform-specific settings for Linux
                 if (os == OperatingSystem.Linux && config.PlatformSpecific?.Linux != null)
@@ -240,6 +214,8 @@ namespace AppiumBootstrapInstaller.Services
                         args.Add("--install_ios_support=true");
                     if (!linuxConfig.InstallAndroidSupport)
                         args.Add("--install_android_support=false");
+                    if (!string.IsNullOrEmpty(linuxConfig.GoIosVersion))
+                        args.Add($"--go_ios_version=\"{linuxConfig.GoIosVersion}\"");
                 }
             }
 
@@ -262,7 +238,7 @@ namespace AppiumBootstrapInstaller.Services
             {
                 _logger.LogInformation("Setting execute permissions on: {ScriptPath}", scriptPath);
 
-                var process = new Process
+                using var process = new Process
                 {
                     StartInfo = new ProcessStartInfo
                     {
@@ -276,7 +252,14 @@ namespace AppiumBootstrapInstaller.Services
                 };
 
                 process.Start();
-                process.WaitForExit();
+                process.WaitForExit(5000); // 5 second timeout
+
+                if (!process.HasExited)
+                {
+                    _logger.LogWarning("chmod command timed out, killing process");
+                    process.Kill();
+                    return;
+                }
 
                 if (process.ExitCode != 0)
                 {
@@ -291,7 +274,7 @@ namespace AppiumBootstrapInstaller.Services
         }
 
         /// <summary>
-        /// Deletes the installation folder if it exists
+        /// Deletes the installation folder if it exists, with better handling of locked files
         /// </summary>
         public void CleanInstallationFolder(string installFolder)
         {
@@ -300,16 +283,19 @@ namespace AppiumBootstrapInstaller.Services
                 _logger.LogInformation("Cleaning installation folder: {InstallFolder}", installFolder);
                 try
                 {
+                    // Try full delete first (fastest if nothing is locked)
                     Directory.Delete(installFolder, true);
                     _logger.LogInformation("Installation folder cleaned successfully.");
                 }
                 catch (IOException ex)
                 {
-                    _logger.LogWarning("Failed to fully clean installation folder (files in use): {Message}. Continuing installation...", ex.Message);
+                    _logger.LogWarning("Failed to fully clean installation folder (files in use): {Message}. Attempting selective cleanup...", ex.Message);
+                    CleanFolderSelectively(installFolder);
                 }
                 catch (UnauthorizedAccessException ex)
                 {
-                    _logger.LogWarning("Failed to clean installation folder (access denied): {Message}. Continuing installation...", ex.Message);
+                    _logger.LogWarning("Failed to clean installation folder (access denied): {Message}. Attempting selective cleanup...", ex.Message);
+                    CleanFolderSelectively(installFolder);
                 }
                 catch (Exception ex)
                 {
@@ -319,6 +305,65 @@ namespace AppiumBootstrapInstaller.Services
             else
             {
                 _logger.LogInformation("Installation folder does not exist, skipping cleanup: {InstallFolder}", installFolder);
+            }
+        }
+
+        /// <summary>
+        /// Selectively cleans folder contents, skipping locked files/folders
+        /// </summary>
+        private void CleanFolderSelectively(string folderPath)
+        {
+            try
+            {
+                // Delete subdirectories first
+                foreach (var dir in Directory.GetDirectories(folderPath))
+                {
+                    try
+                    {
+                        Directory.Delete(dir, true);
+                        _logger.LogDebug("Deleted directory: {Directory}", Path.GetFileName(dir));
+                    }
+                    catch (IOException)
+                    {
+                        _logger.LogDebug("Skipping locked directory: {Directory}", Path.GetFileName(dir));
+                    }
+                    catch (UnauthorizedAccessException)
+                    {
+                        _logger.LogDebug("Skipping protected directory: {Directory}", Path.GetFileName(dir));
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug("Could not delete directory {Directory}: {Message}", Path.GetFileName(dir), ex.Message);
+                    }
+                }
+
+                // Delete files
+                foreach (var file in Directory.GetFiles(folderPath))
+                {
+                    try
+                    {
+                        File.Delete(file);
+                        _logger.LogDebug("Deleted file: {File}", Path.GetFileName(file));
+                    }
+                    catch (IOException)
+                    {
+                        _logger.LogDebug("Skipping locked file: {File}", Path.GetFileName(file));
+                    }
+                    catch (UnauthorizedAccessException)
+                    {
+                        _logger.LogDebug("Skipping protected file: {File}", Path.GetFileName(file));
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug("Could not delete file {File}: {Message}", Path.GetFileName(file), ex.Message);
+                    }
+                }
+
+                _logger.LogInformation("Selective cleanup completed. Some locked files may remain.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Selective cleanup failed: {Message}. Continuing installation...", ex.Message);
             }
         }
 
@@ -373,17 +418,46 @@ namespace AppiumBootstrapInstaller.Services
                     Arguments = processArguments,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
+                    StandardOutputEncoding = Encoding.UTF8,
+                    StandardErrorEncoding = Encoding.UTF8,
                     UseShellExecute = false,
                     CreateNoWindow = true
                 }
             };
 
+            // Force common no-color environment so child processes (npm, node, appium)
+            // emit minimal ANSI sequences. Many CLIs respect NO_COLOR and FORCE_COLOR.
+            try
+            {
+                process.StartInfo.EnvironmentVariables["NO_COLOR"] = "1";
+                process.StartInfo.EnvironmentVariables["FORCE_COLOR"] = "0";
+                process.StartInfo.EnvironmentVariables["TERM"] = "dumb";
+            }
+            catch
+            {
+                // EnvironmentVariables may throw in restricted environments; ignore
+            }
+
             // Stream output in real-time
+            // Regex to strip common ANSI escape sequences
+            var ansiRegex = new Regex(@"\x1B\[[0-9;]*[A-Za-z]", RegexOptions.Compiled);
+
+            string CleanOutput(string s)
+            {
+                if (string.IsNullOrEmpty(s)) return s;
+                // Remove ANSI sequences
+                var cleaned = ansiRegex.Replace(s, string.Empty);
+                // Remove other control characters except common whitespace
+                cleaned = Regex.Replace(cleaned, "[\x00-\x08\x0B\x0C\x0E-\x1F]", string.Empty);
+                return cleaned.Trim();
+            }
+
             process.OutputDataReceived += (sender, e) =>
             {
                 if (!string.IsNullOrEmpty(e.Data))
                 {
-                    _logger.LogInformation("{Output}", e.Data);
+                    var outLine = CleanOutput(e.Data);
+                    if (!string.IsNullOrEmpty(outLine)) _logger.LogInformation("{Output}", outLine);
                 }
             };
 
@@ -391,7 +465,8 @@ namespace AppiumBootstrapInstaller.Services
             {
                 if (!string.IsNullOrEmpty(e.Data))
                 {
-                    _logger.LogError("{Error}", e.Data);
+                    var errLine = CleanOutput(e.Data);
+                    if (!string.IsNullOrEmpty(errLine)) _logger.LogError("{Error}", errLine);
                 }
             };
 

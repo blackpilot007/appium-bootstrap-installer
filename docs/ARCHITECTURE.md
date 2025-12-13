@@ -21,9 +21,7 @@ Understanding how Appium Bootstrap Installer works under the hood.
         │             │              ├─► DeviceRegistry
         │             │              └─► AppiumSessionManager
         │             │                      │
-        │             │                      ├─► NSSM (Windows)
-        │             │                      ├─► Supervisor (macOS)
-        │             │                      └─► systemd (Linux)
+        │             │                      └─► Portable process-mode (child processes)
         │             │
         └─────────────┴──────────────────────┐
                                              │
@@ -59,15 +57,13 @@ Understanding how Appium Bootstrap Installer works under the hood.
    │
    ├─► STEP 1: Install Dependencies
    │   ├─ Execute Platform/{OS}/Scripts/InstallDependencies.{ext}
-   │   ├─ Install Node.js via NVM
+   │   ├─ Install Node.js via NVM (all platforms: nvm-windows on Windows, nvm on macOS/Linux)
    │   ├─ Install Appium via npm
    │   ├─ Install configured drivers
    │   └─ Install configured plugins
    │
    ├─► STEP 2: Setup Service Manager
-   │   ├─ Windows: Install NSSM
-   │   ├─ macOS: Setup Supervisor
-   │   └─ Linux: Setup systemd
+    │   └─ Optional: setup helpers (portable default skips system services)
    │
    └─► STEP 3: Start Device Listener (if EnableDeviceListener: true)
        └─ Enter device monitoring loop

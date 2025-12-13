@@ -8,7 +8,11 @@ namespace AppiumBootstrapInstaller.Models;
 [JsonSerializable(typeof(AppiumSession))]
 [JsonSerializable(typeof(DeviceRegistryData))]
 [JsonSerializable(typeof(InstallConfig))]
+[JsonSerializable(typeof(DriverConfig))]
+[JsonSerializable(typeof(PluginConfig))]
 [JsonSerializable(typeof(List<Device>))]
+[JsonSerializable(typeof(List<DriverConfig>))]
+[JsonSerializable(typeof(List<PluginConfig>))]
 [JsonSerializable(typeof(Dictionary<string, Device>))]
 [JsonSourceGenerationOptions(
     WriteIndented = true,

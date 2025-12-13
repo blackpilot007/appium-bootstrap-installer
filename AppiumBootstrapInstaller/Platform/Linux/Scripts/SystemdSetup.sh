@@ -54,6 +54,14 @@ if [[ "${DEBUG:-0}" == "1" ]]; then
     set -x
 fi
 
+# Portable-first: skip systemd setup unless explicitly enabled
+if [[ "${ENABLE_SYSTEMD:-0}" != "1" ]]; then
+    script_log "Skipping systemd setup (portable mode)."
+    script_log "Set ENABLE_SYSTEMD=1 if you intentionally want per-user systemd units."
+    script_log "Current install directory: $INSTALL_DIR"
+    exit 0
+fi
+
 # Functions
 create_directory() {
     local dir=$1

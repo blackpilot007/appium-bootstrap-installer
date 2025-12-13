@@ -44,11 +44,17 @@ namespace AppiumBootstrapInstaller.Models
         [JsonPropertyName("enableDeviceListener")]
         public bool EnableDeviceListener { get; set; } = false;
 
+        // NOTE: Previously had a RunDeviceListenerInline flag. Inline device listener
+        // behavior is now the default when `enableDeviceListener` is true, so no
+        // separate flag is required.
         [JsonPropertyName("deviceListenerPollInterval")]
         public int DeviceListenerPollInterval { get; set; } = 5;
 
         [JsonPropertyName("autoStartAppium")]
         public bool AutoStartAppium { get; set; } = true;
+
+        [JsonPropertyName("prebuiltWdaPath")]
+        public string? PrebuiltWdaPath { get; set; } = string.Empty;
 
         [JsonPropertyName("cleanInstallFolder")]
         public bool CleanInstallFolder { get; set; } = false;
@@ -148,6 +154,9 @@ namespace AppiumBootstrapInstaller.Models
 
         [JsonPropertyName("nvmVersion")]
         public string? NvmVersion { get; set; }
+
+        [JsonPropertyName("goIosVersion")]
+        public string? GoIosVersion { get; set; } = "v1.0.189";
     }
 
     /// <summary>
@@ -163,6 +172,9 @@ namespace AppiumBootstrapInstaller.Models
 
         [JsonPropertyName("nvmVersion")]
         public string? NvmVersion { get; set; }
+
+        [JsonPropertyName("goIosVersion")]
+        public string? GoIosVersion { get; set; } = "v1.0.189";
     }
 
     /// <summary>
@@ -178,5 +190,8 @@ namespace AppiumBootstrapInstaller.Models
 
         [JsonPropertyName("nvmVersion")]
         public string? NvmVersion { get; set; }
+
+        [JsonPropertyName("goIosVersion")]
+        public string? GoIosVersion { get; set; } = "v1.0.189";
     }
 }

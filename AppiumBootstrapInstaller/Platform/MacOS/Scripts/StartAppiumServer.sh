@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# appium.sh - Linux version
-# Starts Appium server with specified ports
+# StartAppiumServer.sh - MacOS version
+# Starts Appium server with specified ports for iOS devices
 # Uses explicit fully qualified paths for complete isolation
 
 # Require at least 7 parameters; 8th optional PrebuiltWdaPath
@@ -25,7 +25,7 @@ if [ "$#" -eq 8 ]; then
 fi
 
 echo "========================================="
-echo "Starting Appium Server (Linux)"
+echo "Starting Appium Server (macOS)"
 echo "========================================="
 echo "Appium Home: $APPIUM_HOME"
 echo "Node.js Path: $NODE_PATH"
@@ -57,7 +57,7 @@ if [ -n "$PREBUILT_WDA_PATH" ]; then
     echo "Using prebuilt WDA: $APPIUM_PREBUILT_WDA"
 fi
 
-# Prepare Appium script path - use explicit node execution
+# Prepare Appium script path
 APPIUM_SCRIPT="$APPIUM_HOME/node_modules/appium/build/lib/main.js"
 
 if [ ! -f "$APPIUM_SCRIPT" ]; then
@@ -70,8 +70,8 @@ APPIUM_VERSION=$($NODE_EXE "$APPIUM_SCRIPT" --version 2>/dev/null)
 APPIUM_MAJOR_VERSION=$(echo $APPIUM_VERSION | cut -d'.' -f1)
 echo "Detected Appium version: $APPIUM_VERSION (Major: $APPIUM_MAJOR_VERSION)"
 
-# No NVM loading or PATH manipulation needed - using fully qualified paths
-echo "Node version: $($NODE_EXE --version)"
+# No NVM loading needed - using explicit paths
+# No PATH manipulation needed - using fully qualified paths
 
 # Check for DeviceFarm plugin
 echo "Checking for DeviceFarm plugin..."
