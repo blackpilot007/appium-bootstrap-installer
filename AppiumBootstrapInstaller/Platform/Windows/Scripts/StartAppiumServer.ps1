@@ -23,6 +23,8 @@ param(
     
     [Parameter(Mandatory=$true)]
     [int]$MpegLocalPort
+    ,[Parameter(Mandatory=$false)]
+    [string]$PrebuiltWdaPath = ""
 )
 
 $ErrorActionPreference = "Continue"
@@ -50,6 +52,12 @@ Write-Host "Using local Node.js: $nodeExe" -ForegroundColor Green
 
 # Set APPIUM_HOME explicitly for this process only (not system-wide)
 $env:APPIUM_HOME = $AppiumHomePath
+
+# If a prebuilt WDA path/URL is provided, export it for the Appium process
+if (-not [string]::IsNullOrWhiteSpace($PrebuiltWdaPath)) {
+    Write-Host "Using prebuilt WDA path: $PrebuiltWdaPath" -ForegroundColor Green
+    $env:APPIUM_PREBUILT_WDA = $PrebuiltWdaPath
+}
 
 # Prepare fully qualified paths
 $appiumScript = Join-Path $AppiumHomePath "node_modules\appium\build\lib\main.js"
@@ -175,31 +183,41 @@ if ($DeviceFarmInstalled) {
     Write-Host "DeviceFarm not installed - plugins: $PluginList" -ForegroundColor Yellow
 }
 
-# Build Appium command
+# Build Appium command using an argument array to avoid quoting/escaping issues
 $DefaultCapabilities = "{`"appium:wdaLocalPort`": $WdaLocalPort,`"appium:mjpegServerPort`": $MpegLocalPort}"
 
+# Ensure wrapper path variable is available
+$appiumCmd = Join-Path $AppiumBinPath "appium.cmd"
+
+$exe = $null
+$args = @()
+
 if ($nodeExe -and (Test-Path $appiumScript)) {
+    $exe = $nodeExe
     if ($AppiumMajorVersion -eq "3") {
-        # Appium 3.x via node
-        $AppiumCommand = "& `"$nodeExe`" `"$appiumScript`" server -p $AppiumPort --allow-cors --allow-insecure=xcuitest:get_server_logs --default-capabilities '$DefaultCapabilities' --log-level info --log-timestamp --local-timezone --log-no-colors --use-plugins=$PluginList $PluginOptions"
+        $args = @($appiumScript, 'server', '-p', $AppiumPort.ToString(), '--allow-cors', '--allow-insecure=xcuitest:get_server_logs', '--default-capabilities', $DefaultCapabilities, '--log-level', 'info', '--log-timestamp', '--local-timezone', '--log-no-colors', '--use-plugins', $PluginList)
     } else {
-        # Appium 2.x via node
-        $AppiumCommand = "& `"$nodeExe`" `"$appiumScript`" -p $AppiumPort --allow-cors --allow-insecure=get_server_logs --default-capabilities '$DefaultCapabilities' --log-level info --log-timestamp --local-timezone --log-no-colors --use-plugins=$PluginList $PluginOptions"
+        $args = @($appiumScript, '-p', $AppiumPort.ToString(), '--allow-cors', '--allow-insecure=get_server_logs', '--default-capabilities', $DefaultCapabilities, '--log-level', 'info', '--log-timestamp', '--local-timezone', '--log-no-colors', '--use-plugins', $PluginList)
     }
 } else {
+    $exe = $appiumCmd
     if ($AppiumMajorVersion -eq "3") {
-        # Appium 3.x fallback to wrapper
-        $AppiumCommand = "& `"$AppiumBinPath\appium.cmd`" server -p $AppiumPort --allow-cors --allow-insecure=xcuitest:get_server_logs --default-capabilities '$DefaultCapabilities' --log-level info --log-timestamp --local-timezone --log-no-colors --use-plugins=$PluginList $PluginOptions"
+        $args = @('server', '-p', $AppiumPort.ToString(), '--allow-cors', '--allow-insecure=xcuitest:get_server_logs', '--default-capabilities', $DefaultCapabilities, '--log-level', 'info', '--log-timestamp', '--local-timezone', '--log-no-colors', '--use-plugins', $PluginList)
     } else {
-        # Appium 2.x fallback to wrapper
-        $AppiumCommand = "& `"$AppiumBinPath\appium.cmd`" -p $AppiumPort --allow-cors --allow-insecure=get_server_logs --default-capabilities '$DefaultCapabilities' --log-level info --log-timestamp --local-timezone --log-no-colors --use-plugins=$PluginList $PluginOptions"
+        $args = @('-p', $AppiumPort.ToString(), '--allow-cors', '--allow-insecure=get_server_logs', '--default-capabilities', $DefaultCapabilities, '--log-level', 'info', '--log-timestamp', '--local-timezone', '--log-no-colors', '--use-plugins', $PluginList)
     }
+}
+
+# Append any plugin option tokens (split into separate args)
+if ($PluginOptions) {
+    $tokens = $PluginOptions.Trim() -split '\s+'
+    if ($tokens) { $args += $tokens }
 }
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "Executing Appium Command:" -ForegroundColor Cyan
-Write-Host $AppiumCommand -ForegroundColor White
+Write-Host ($exe + ' ' + ($args -join ' ')) -ForegroundColor White
 Write-Host "========================================" -ForegroundColor Cyan
 
-# Execute Appium
-Invoke-Expression $AppiumCommand
+# Execute Appium using call operator with args array
+& $exe @args 2>&1

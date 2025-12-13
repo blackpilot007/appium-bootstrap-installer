@@ -53,6 +53,9 @@ namespace AppiumBootstrapInstaller.Models
         [JsonPropertyName("autoStartAppium")]
         public bool AutoStartAppium { get; set; } = true;
 
+        [JsonPropertyName("prebuiltWdaPath")]
+        public string? PrebuiltWdaPath { get; set; } = string.Empty;
+
         [JsonPropertyName("cleanInstallFolder")]
         public bool CleanInstallFolder { get; set; } = false;
 

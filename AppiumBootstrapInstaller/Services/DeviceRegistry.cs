@@ -65,8 +65,37 @@ namespace AppiumBootstrapInstaller.Services
         public void AddOrUpdateDevice(Device device)
         {
             device.LastSeen = DateTime.UtcNow;
-            _devices.AddOrUpdate(device.Id, device, (_, _) => device);
-            _logger.LogInformation("Device {DeviceId} ({Platform}) updated in registry", device.Id, device.Platform);
+
+            if (_devices.TryGetValue(device.Id, out var existing))
+            {
+                // Preserve any runtime session if present on existing record
+                if (existing.AppiumSession != null && device.AppiumSession == null)
+                {
+                    device.AppiumSession = existing.AppiumSession;
+                }
+
+                // Determine whether metadata/state changed meaningfully
+                var metadataChanged = existing.State != device.State
+                                      || existing.Name != device.Name
+                                      || existing.Type != device.Type
+                                      || existing.Platform != device.Platform;
+
+                _devices[device.Id] = device;
+
+                if (metadataChanged)
+                {
+                    _logger.LogInformation("Device {DeviceId} ({Platform}) updated in registry", device.Id, device.Platform);
+                }
+                else
+                {
+                    _logger.LogDebug("Device {DeviceId} heartbeat - LastSeen updated", device.Id);
+                }
+            }
+            else
+            {
+                _devices.TryAdd(device.Id, device);
+                _logger.LogInformation("Device {DeviceId} ({Platform}) added to registry", device.Id, device.Platform);
+            }
         }
 
         public void RemoveDevice(string deviceId)

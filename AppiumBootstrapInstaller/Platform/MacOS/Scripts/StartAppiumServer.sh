@@ -4,13 +4,13 @@
 # Starts Appium server with specified ports for iOS devices
 # Uses explicit fully qualified paths for complete isolation
 
-# Require all parameters
-if [ "$#" -ne 7 ]; then
-    echo "Usage: $0 <appium_home_path> <appium_bin_path> <node_path> <install_folder> <appium_port> <wda_local_port> <mpeg_local_port>"
+# Require at least 7 parameters; 8th optional PrebuiltWdaPath
+if [ "$#" -lt 7 ] || [ "$#" -gt 8 ]; then
+    echo "Usage: $0 <appium_home_path> <appium_bin_path> <node_path> <install_folder> <appium_port> <wda_local_port> <mpeg_local_port> [prebuilt_wda_path]"
     exit 1
 fi
 
-# Parse arguments - all required for isolation
+# Parse arguments - required for isolation
 APPIUM_HOME="$1"
 APPIUM_BIN="$2"
 NODE_PATH="$3"
@@ -18,6 +18,11 @@ INSTALL_FOLDER="$4"
 APPIUM_PORT="$5"
 WDA_LOCAL_PORT="$6"
 MPEG_LOCAL_PORT="$7"
+# Optional prebuilt WDA path (local path or URL)
+PREBUILT_WDA_PATH=""
+if [ "$#" -eq 8 ]; then
+    PREBUILT_WDA_PATH="$8"
+fi
 
 echo "========================================="
 echo "Starting Appium Server (macOS)"
@@ -28,6 +33,9 @@ echo "Install Folder: $INSTALL_FOLDER"
 echo "Appium Port: $APPIUM_PORT"
 echo "WDA Local Port: $WDA_LOCAL_PORT"
 echo "MPEG Local Port: $MPEG_LOCAL_PORT"
+if [ -n "$PREBUILT_WDA_PATH" ]; then
+    echo "Prebuilt WDA Path: $PREBUILT_WDA_PATH"
+fi
 echo "========================================="
 
 # Use explicit fully qualified node path
@@ -42,6 +50,12 @@ echo "Using local Node.js: $NODE_EXE"
 
 # Set APPIUM_HOME explicitly for this process only (not system-wide)
 export APPIUM_HOME="$APPIUM_HOME"
+
+# If provided, export prebuilt WDA path for Appium process
+if [ -n "$PREBUILT_WDA_PATH" ]; then
+    export APPIUM_PREBUILT_WDA="$PREBUILT_WDA_PATH"
+    echo "Using prebuilt WDA: $APPIUM_PREBUILT_WDA"
+fi
 
 # Prepare Appium script path
 APPIUM_SCRIPT="$APPIUM_HOME/node_modules/appium/build/lib/main.js"

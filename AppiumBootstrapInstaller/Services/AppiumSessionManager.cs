@@ -35,6 +35,7 @@ namespace AppiumBootstrapInstaller.Services
         private readonly SemaphoreSlim _portLock = new(1, 1);
         private readonly bool _isWindows;
         private readonly DeviceMetrics _metrics;
+        private readonly string? _prebuiltWdaPath;
         
         // Track running processes by SessionId
         private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Process> _runningProcesses = new();
@@ -43,13 +44,15 @@ namespace AppiumBootstrapInstaller.Services
             ILogger<AppiumSessionManager> logger,
             string installFolder,
             PortRangeConfig portConfig,
-            DeviceMetrics metrics)
+            DeviceMetrics metrics,
+            string? prebuiltWdaPath = null)
         {
             _logger = logger;
             _installFolder = installFolder;
             _portConfig = portConfig;
             _metrics = metrics;
             _isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+            _prebuiltWdaPath = prebuiltWdaPath;
             
             _logger.LogInformation("AppiumSessionManager initialized in Process Mode (Non-Admin)");
         }
@@ -410,7 +413,7 @@ namespace AppiumBootstrapInstaller.Services
                 var logDir = Path.Combine(executableDir, "logs");
                 Directory.CreateDirectory(logDir);
 
-                if (_isWindows)
+                    if (_isWindows)
                 {
                     scriptPath = Path.Combine(_installFolder, "Platform", "Windows", "Scripts", "StartAppiumServer.ps1");
                     executable = "powershell.exe";
@@ -421,7 +424,8 @@ namespace AppiumBootstrapInstaller.Services
                                 $"-InstallFolder \"{_installFolder}\" " +
                                 $"-AppiumPort {appiumPort} " +
                                 $"-WdaLocalPort {wdaPort ?? 0} " +
-                                $"-MpegLocalPort {mjpegPort ?? 0}";
+                                $"-MpegLocalPort {mjpegPort ?? 0} " +
+                                $"-PrebuiltWdaPath \"{_prebuiltWdaPath ?? string.Empty}\"";
                 }
                 else
                 {
@@ -431,7 +435,7 @@ namespace AppiumBootstrapInstaller.Services
                     
                     executable = "/bin/bash";
                     // Pass explicit paths instead of relying on environment
-                    arguments = $"\"{scriptPath}\" \"{appiumHome}\" \"{appiumBin}\" \"{nodejsPath}\" \"{_installFolder}\" {appiumPort} {wdaPort ?? 0} {mjpegPort ?? 0}";
+                    arguments = $"\"{scriptPath}\" \"{appiumHome}\" \"{appiumBin}\" \"{nodejsPath}\" \"{_installFolder}\" {appiumPort} {wdaPort ?? 0} {mjpegPort ?? 0} \"{_prebuiltWdaPath ?? string.Empty}\"";
                     
                     // Ensure script is executable (Unix only)
                     if (!_isWindows && File.Exists(scriptPath))

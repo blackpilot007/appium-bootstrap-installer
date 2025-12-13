@@ -432,7 +432,8 @@ namespace AppiumBootstrapInstaller
                     serviceProvider.GetRequiredService<ILogger<AppiumSessionManager>>(),
                     config.InstallFolder,
                     config.PortRanges,
-                    metrics
+                    metrics,
+                    config.PrebuiltWdaPath
                 );
 
                 var deviceListener = new DeviceListenerService(

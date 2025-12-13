@@ -333,8 +333,8 @@ namespace AppiumBootstrapInstaller.Services
                                         });
                                         
                                         // Log all device details
-                                        _logger.LogInformation(
-                                            "iOS Device Detected: {DeviceName} | UDID: {Udid} | Model: {ProductName} | iOS: {ProductVersion}",
+                                        _logger.LogDebug(
+                                            "iOS Device Detected (poll): {DeviceName} | UDID: {Udid} | Model: {ProductName} | iOS: {ProductVersion}",
                                             displayName, udid, productName ?? "N/A", productVersion ?? "N/A"
                                         );
                                     }
@@ -459,6 +459,40 @@ namespace AppiumBootstrapInstaller.Services
 
                 _metrics.RecordDeviceConnected(device.Platform.ToString());
                 _registry.AddOrUpdateDevice(device);
+
+                // If this is an iOS device and auto-start is enabled, ensure a
+                // prebuilt WDA path/URL is configured. Building WDA on Windows
+                // is not supported, so require an explicit prebuilt WDA when
+                // AutoStartAppium is true.
+                if (device.Platform == DevicePlatform.iOS && _config.AutoStartAppium)
+                {
+                    // On Windows or Linux hosts we cannot build/sign WDA. Require a
+                    // prebuilt WDA path/URL to be configured to auto-start iOS sessions.
+                    if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) || RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+                    {
+                        if (string.IsNullOrWhiteSpace(_config.PrebuiltWdaPath))
+                        {
+                            _metrics.RecordSessionFailed("NoPrebuiltWda");
+                            _logger.LogWarning(
+                                "[{CorrelationId}] AutoStartAppium is enabled but no 'prebuiltWdaPath' is configured. Running on Windows/Linux so building WDA is not supported; skipping iOS Appium session start for {DeviceId}. To enable, set 'prebuiltWdaPath' in config to a path or URL to a signed/prebuilt WDA bundle on a macOS host.",
+                                correlationId, device.Id
+                            );
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        // On macOS, allow building WDA if PrebuiltWdaPath is not provided.
+                        if (!string.IsNullOrWhiteSpace(_config.PrebuiltWdaPath))
+                        {
+                            _logger.LogInformation("[{CorrelationId}] Using configured prebuilt WDA for {DeviceId}", correlationId, device.Id);
+                        }
+                        else
+                        {
+                            _logger.LogInformation("[{CorrelationId}] No prebuilt WDA configured; will attempt to build WDA on macOS for {DeviceId}", correlationId, device.Id);
+                        }
+                    }
+                }
 
                 if (_config.AutoStartAppium)
                 {
