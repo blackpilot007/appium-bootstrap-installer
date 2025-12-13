@@ -28,6 +28,7 @@ The application searches for configuration files in this order:
   "EnableDeviceListener": "boolean (default: false) - Enable automatic device monitoring",
   "AutoStartAppium": "boolean (default: true) - Auto-start Appium for detected devices",
   "DeviceListenerPollInterval": "number (default: 5) - Device check interval in seconds",
+    "prebuiltWdaPath": "string (optional) - Path or URL to a signed/prebuilt WebDriverAgent bundle (macOS host).\nIf set, will be exported to Appium as environment variable APPIUM_PREBUILT_WDA.\nOn Windows and Linux, AutoStartAppium will NOT start iOS sessions unless this path is provided.\nOn macOS, if this is not set the installer may attempt to build WDA from Xcode project."
 
   // ============================================
   // PORT CONFIGURATION

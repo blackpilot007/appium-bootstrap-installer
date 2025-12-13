@@ -112,6 +112,7 @@ chmod +x AppiumBootstrapInstaller
   "enableDeviceListener": true,        // Enable device monitoring
   "deviceListenerPollInterval": 5,     // Poll every 5 seconds
   "autoStartAppium": true,             // Auto-start Appium per device
+  "prebuiltWdaPath": "string (optional) - For iOS on macOS: path or URL to signed/prebuilt WebDriverAgent bundle.\n  On Windows/Linux, Appium will NOT auto-start iOS sessions unless this is provided."
   "deviceRegistry": {
     "enabled": true,
     "filePath": "device-registry.json",

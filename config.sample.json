@@ -79,6 +79,7 @@
     "enableDeviceListener": false,
     "deviceListenerPollInterval": 5,
     "autoStartAppium": true,
+    "prebuiltWdaPath": "", /* Optional: path or URL to a signed/prebuilt WebDriverAgent bundle (macOS host). \n                                 When set, the installer will export this as environment variable APPIUM_PREBUILT_WDA for Appium. \n                                 On Windows and Linux, iOS Appium sessions will NOT be auto-started unless this is provided. */
     "deviceRegistry": {
         "enabled": true,
         "filePath": "device-registry.json",
