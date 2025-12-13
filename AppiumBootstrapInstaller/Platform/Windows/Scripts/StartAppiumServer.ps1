@@ -22,9 +22,16 @@ param(
     [int]$WdaLocalPort,
     
     [Parameter(Mandatory=$true)]
-    [int]$MpegLocalPort
-    ,[Parameter(Mandatory=$false)]
-    [string]$PrebuiltWdaPath = ""
+    [int]$MpegLocalPort,
+    
+    [Parameter(Mandatory=$false)]
+    [string]$PrebuiltWdaPath = "",
+    
+    [Parameter(Mandatory=$false)]
+    [string]$DeviceUdid = "",
+    
+    [Parameter(Mandatory=$false)]
+    [string]$Platform = ""
 )
 
 $ErrorActionPreference = "Continue"
@@ -38,7 +45,35 @@ Write-Host "Install Folder: $InstallFolder"
 Write-Host "Appium Port: $AppiumPort"
 Write-Host "WDA Local Port: $WdaLocalPort"
 Write-Host "MPEG Local Port: $MpegLocalPort"
+Write-Host "Device UDID: $DeviceUdid"
+Write-Host "Platform: $Platform"
 Write-Host "========================================" -ForegroundColor Cyan
+
+# Setup iOS port forwarding if it's an iOS device
+if ($Platform -eq "iOS" -and -not [string]::IsNullOrWhiteSpace($DeviceUdid)) {
+    Write-Host "Setting up iOS port forwarding for device $DeviceUdid..." -ForegroundColor Cyan
+    
+    $goIosPath = Join-Path $InstallFolder ".cache\appium-device-farm\goIOS\ios\ios.exe"
+    
+    if (Test-Path $goIosPath) {
+        # Forward WDA port (8100 on device -> WdaLocalPort on host)
+        Write-Host "Forwarding WDA port: $WdaLocalPort -> 8100 on device" -ForegroundColor Yellow
+        $forwardWdaCmd = "& '$goIosPath' forward --udid '$DeviceUdid' $WdaLocalPort 8100"
+        Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile", "-Command", $forwardWdaCmd -WindowStyle Hidden
+        
+        # Forward MJPEG port if specified (9100 on device -> MpegLocalPort on host)
+        if ($MpegLocalPort -gt 0) {
+            Write-Host "Forwarding MJPEG port: $MpegLocalPort -> 9100 on device" -ForegroundColor Yellow
+            $forwardMjpegCmd = "& '$goIosPath' forward --udid '$DeviceUdid' $MpegLocalPort 9100"
+            Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile", "-Command", $forwardMjpegCmd -WindowStyle Hidden
+        }
+        
+        Start-Sleep -Seconds 2
+        Write-Host "✅ iOS port forwarding setup completed" -ForegroundColor Green
+    } else {
+        Write-Host "⚠️ go-ios not found at $goIosPath, skipping port forwarding" -ForegroundColor Yellow
+    }
+}
 
 # Use explicit fully qualified paths - no PATH manipulation needed
 $nodeExe = Join-Path $NodePath "node.exe"

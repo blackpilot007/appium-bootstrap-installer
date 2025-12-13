@@ -14,21 +14,24 @@
  * limitations under the License.
  */
 
+using AppiumBootstrapInstaller.Models;
+using AppiumBootstrapInstaller.Services.Interfaces;
+
 namespace AppiumBootstrapInstaller.Services
 {
     /// <summary>
     /// Collects and tracks metrics for device listener operations
     /// </summary>
-    public class DeviceMetrics
+    public class DeviceMetrics : IDeviceMetrics
     {
         private readonly object _lock = new();
         private int _devicesConnectedTotal = 0;
         private int _devicesDisconnectedTotal = 0;
         private int _sessionsStartedTotal = 0;
+        private int _sessionsStoppedTotal = 0;
         private int _sessionsFailedTotal = 0;
         private int _portAllocationFailuresTotal = 0;
         private readonly Dictionary<string, int> _sessionFailureReasons = new();
-        private readonly List<TimeSpan> _sessionStartDurations = new();
 
         // Current state
         public int AndroidDevicesConnected { get; private set; }
@@ -39,6 +42,7 @@ namespace AppiumBootstrapInstaller.Services
         public int DevicesConnectedTotal => _devicesConnectedTotal;
         public int DevicesDisconnectedTotal => _devicesDisconnectedTotal;
         public int SessionsStartedTotal => _sessionsStartedTotal;
+        public int SessionsStoppedTotal => _sessionsStoppedTotal;
         public int SessionsFailedTotal => _sessionsFailedTotal;
         public int PortAllocationFailuresTotal => _portAllocationFailuresTotal;
 
@@ -48,58 +52,40 @@ namespace AppiumBootstrapInstaller.Services
                 ? (double)SessionsStartedTotal / (SessionsStartedTotal + SessionsFailedTotal) * 100
                 : 100.0;
 
-        public TimeSpan AverageSessionStartDuration
-        {
-            get
-            {
-                lock (_lock)
-                {
-                    return _sessionStartDurations.Any()
-                        ? TimeSpan.FromMilliseconds(_sessionStartDurations.Average(ts => ts.TotalMilliseconds))
-                        : TimeSpan.Zero;
-                }
-            }
-        }
-
-        public void RecordDeviceConnected(string platform)
+        public void RecordDeviceConnected(DevicePlatform platform, DeviceType type)
         {
             lock (_lock)
             {
                 Interlocked.Increment(ref _devicesConnectedTotal);
-                if (platform == "Android")
+                if (platform == DevicePlatform.Android)
                     AndroidDevicesConnected++;
-                else if (platform == "iOS")
+                else if (platform == DevicePlatform.iOS)
                     IOSDevicesConnected++;
             }
         }
 
-        public void RecordDeviceDisconnected(string platform)
+        public void RecordDeviceDisconnected(DevicePlatform platform)
         {
             lock (_lock)
             {
                 Interlocked.Increment(ref _devicesDisconnectedTotal);
-                if (platform == "Android")
+                if (platform == DevicePlatform.Android)
                     AndroidDevicesConnected = Math.Max(0, AndroidDevicesConnected - 1);
-                else if (platform == "iOS")
+                else if (platform == DevicePlatform.iOS)
                     IOSDevicesConnected = Math.Max(0, IOSDevicesConnected - 1);
             }
         }
 
-        public void RecordSessionStarted(TimeSpan duration)
+        public void RecordSessionStarted(DevicePlatform platform)
         {
             lock (_lock)
             {
                 Interlocked.Increment(ref _sessionsStartedTotal);
                 ActiveSessions++;
-                _sessionStartDurations.Add(duration);
-                
-                // Keep only last 100 durations for moving average
-                if (_sessionStartDurations.Count > 100)
-                    _sessionStartDurations.RemoveAt(0);
             }
         }
 
-        public void RecordSessionFailed(string reason)
+        public void RecordSessionFailed(DevicePlatform platform, string reason)
         {
             lock (_lock)
             {
@@ -110,10 +96,11 @@ namespace AppiumBootstrapInstaller.Services
             }
         }
 
-        public void RecordSessionStopped()
+        public void RecordSessionStopped(DevicePlatform platform)
         {
             lock (_lock)
             {
+                Interlocked.Increment(ref _sessionsStoppedTotal);
                 ActiveSessions = Math.Max(0, ActiveSessions - 1);
             }
         }
@@ -137,8 +124,7 @@ namespace AppiumBootstrapInstaller.Services
             {
                 return $"Devices: {AndroidDevicesConnected} Android, {IOSDevicesConnected} iOS | " +
                        $"Sessions: {ActiveSessions} active, {SessionsStartedTotal} started, {SessionsFailedTotal} failed ({SessionStartSuccessRate:F1}% success) | " +
-                       $"Port Failures: {PortAllocationFailuresTotal} | " +
-                       $"Avg Start Time: {AverageSessionStartDuration.TotalSeconds:F2}s";
+                       $"Port Failures: {PortAllocationFailuresTotal}";
             }
         }
     }

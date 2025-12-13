@@ -4,9 +4,9 @@
 # Starts Appium server with specified ports for iOS devices
 # Uses explicit fully qualified paths for complete isolation
 
-# Require at least 7 parameters; 8th optional PrebuiltWdaPath
-if [ "$#" -lt 7 ] || [ "$#" -gt 8 ]; then
-    echo "Usage: $0 <appium_home_path> <appium_bin_path> <node_path> <install_folder> <appium_port> <wda_local_port> <mpeg_local_port> [prebuilt_wda_path]"
+# Require at least 9 parameters; 8th optional PrebuiltWdaPath, 9-10 DeviceUdid and Platform
+if [ "$#" -lt 7 ] || [ "$#" -gt 10 ]; then
+    echo "Usage: $0 <appium_home_path> <appium_bin_path> <node_path> <install_folder> <appium_port> <wda_local_port> <mpeg_local_port> [prebuilt_wda_path] [device_udid] [platform]"
     exit 1
 fi
 
@@ -20,8 +20,17 @@ WDA_LOCAL_PORT="$6"
 MPEG_LOCAL_PORT="$7"
 # Optional prebuilt WDA path (local path or URL)
 PREBUILT_WDA_PATH=""
-if [ "$#" -eq 8 ]; then
+if [ "$#" -ge 8 ]; then
     PREBUILT_WDA_PATH="$8"
+fi
+# Optional device UDID and platform
+DEVICE_UDID=""
+PLATFORM=""
+if [ "$#" -ge 9 ]; then
+    DEVICE_UDID="$9"
+fi
+if [ "$#" -eq 10 ]; then
+    PLATFORM="${10}"
 fi
 
 echo "========================================="
@@ -36,7 +45,37 @@ echo "MPEG Local Port: $MPEG_LOCAL_PORT"
 if [ -n "$PREBUILT_WDA_PATH" ]; then
     echo "Prebuilt WDA Path: $PREBUILT_WDA_PATH"
 fi
+if [ -n "$DEVICE_UDID" ]; then
+    echo "Device UDID: $DEVICE_UDID"
+fi
+if [ -n "$PLATFORM" ]; then
+    echo "Platform: $PLATFORM"
+fi
 echo "========================================="
+
+# Setup iOS port forwarding if it's an iOS device
+if [ "$PLATFORM" = "iOS" ] && [ -n "$DEVICE_UDID" ]; then
+    echo "Setting up iOS port forwarding for device $DEVICE_UDID..."
+    
+    GOIOS_PATH="$INSTALL_FOLDER/.cache/appium-device-farm/goIOS/ios"
+    
+    if [ -x "$GOIOS_PATH" ]; then
+        # Forward WDA port (8100 on device -> WdaLocalPort on host)
+        echo "Forwarding WDA port: $WDA_LOCAL_PORT -> 8100 on device"
+        "$GOIOS_PATH" forward --udid "$DEVICE_UDID" "$WDA_LOCAL_PORT" 8100 &
+        
+        # Forward MJPEG port if specified (9100 on device -> MpegLocalPort on host)
+        if [ "$MPEG_LOCAL_PORT" -gt 0 ]; then
+            echo "Forwarding MJPEG port: $MPEG_LOCAL_PORT -> 9100 on device"
+            "$GOIOS_PATH" forward --udid "$DEVICE_UDID" "$MPEG_LOCAL_PORT" 9100 &
+        fi
+        
+        sleep 2
+        echo "✅ iOS port forwarding setup completed"
+    else
+        echo "⚠️ go-ios not found at $GOIOS_PATH, skipping port forwarding"
+    fi
+fi
 
 # Use explicit fully qualified node path
 NODE_EXE="$NODE_PATH/bin/node"

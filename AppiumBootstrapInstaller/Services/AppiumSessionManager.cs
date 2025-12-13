@@ -19,6 +19,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using AppiumBootstrapInstaller.Models;
+using AppiumBootstrapInstaller.Services.Interfaces;
 using Microsoft.Extensions.Logging;
 
 namespace AppiumBootstrapInstaller.Services
@@ -26,15 +27,14 @@ namespace AppiumBootstrapInstaller.Services
     /// <summary>
     /// Manages Appium server instances for connected devices in portable process mode (child processes).
     /// </summary>
-    public class AppiumSessionManager
+    public class AppiumSessionManager : IAppiumSessionManager
     {
         private readonly ILogger<AppiumSessionManager> _logger;
         private readonly string _installFolder;
         private readonly PortRangeConfig _portConfig;
-        private readonly HashSet<int> _usedPorts = new(); // Track all allocated ports
-        private readonly SemaphoreSlim _portLock = new(1, 1);
+        private readonly IPortManager _portManager;
         private readonly bool _isWindows;
-        private readonly DeviceMetrics _metrics;
+        private readonly IDeviceMetrics _metrics;
         private readonly string? _prebuiltWdaPath;
         
         // Track running processes by SessionId
@@ -44,17 +44,19 @@ namespace AppiumBootstrapInstaller.Services
             ILogger<AppiumSessionManager> logger,
             string installFolder,
             PortRangeConfig portConfig,
-            DeviceMetrics metrics,
+            IDeviceMetrics metrics,
+            IPortManager portManager,
             string? prebuiltWdaPath = null)
         {
             _logger = logger;
             _installFolder = installFolder;
             _portConfig = portConfig;
             _metrics = metrics;
+            _portManager = portManager;
             _isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
             _prebuiltWdaPath = prebuiltWdaPath;
             
-            _logger.LogInformation("AppiumSessionManager initialized in Process Mode (Non-Admin)");
+            _logger.LogInformation("AppiumSessionManager initialized in Process Mode (Non-Admin) with PortManager");
         }
 
         /// <summary>
@@ -303,8 +305,18 @@ namespace AppiumBootstrapInstaller.Services
         /// <summary>
         /// Stops an Appium session using NSSM/Supervisord
         /// </summary>
-        public async Task StopSessionAsync(AppiumSession session)
+        /// <summary>
+        /// Stops an Appium session for a device
+        /// </summary>
+        public async Task<bool> StopSessionAsync(Device device)
         {
+            if (device.AppiumSession == null)
+            {
+                _logger.LogWarning("Cannot stop session for device {DeviceId} - no active session", device.Id);
+                return false;
+            }
+
+            var session = device.AppiumSession;
             const int maxRetries = 3;
             const int timeoutMs = 10000; // 10 seconds
             
@@ -346,14 +358,14 @@ namespace AppiumBootstrapInstaller.Services
 
                     session.Status = SessionStatus.Stopped;
                     _logger.LogInformation("Successfully stopped session {SessionId}", session.SessionId);
-                    return;
+                    return true;
                 }
                 catch (OperationCanceledException)
                 {
                     _logger.LogWarning(
                         "Stop operation cancelled for session {SessionId}",
                         session.SessionId);
-                    return;
+                    return false;
                 }
                 catch (TimeoutException ex)
                 {
@@ -386,6 +398,7 @@ namespace AppiumBootstrapInstaller.Services
             _logger.LogWarning(
                 "Session {SessionId} marked as stopped after failed cleanup attempts",
                 session.SessionId);
+            return false;
         }
 
         private async Task<bool> StartLocalProcessAsync(
@@ -425,7 +438,9 @@ namespace AppiumBootstrapInstaller.Services
                                 $"-AppiumPort {appiumPort} " +
                                 $"-WdaLocalPort {wdaPort ?? 0} " +
                                 $"-MpegLocalPort {mjpegPort ?? 0} " +
-                                $"-PrebuiltWdaPath \"{_prebuiltWdaPath ?? string.Empty}\"";
+                                $"-PrebuiltWdaPath \"{_prebuiltWdaPath ?? string.Empty}\" " +
+                                $"-DeviceUdid \"{device.Id}\" " +
+                                $"-Platform \"{device.Platform}\"";
                 }
                 else
                 {
@@ -435,7 +450,7 @@ namespace AppiumBootstrapInstaller.Services
                     
                     executable = "/bin/bash";
                     // Pass explicit paths instead of relying on environment
-                    arguments = $"\"{scriptPath}\" \"{appiumHome}\" \"{appiumBin}\" \"{nodejsPath}\" \"{_installFolder}\" {appiumPort} {wdaPort ?? 0} {mjpegPort ?? 0} \"{_prebuiltWdaPath ?? string.Empty}\"";
+                    arguments = $"\"{scriptPath}\" \"{appiumHome}\" \"{appiumBin}\" \"{nodejsPath}\" \"{_installFolder}\" {appiumPort} {wdaPort ?? 0} {mjpegPort ?? 0} \"{_prebuiltWdaPath ?? string.Empty}\" \"{device.Id}\" \"{device.Platform}\"";
                     
                     // Ensure script is executable (Unix only)
                     if (!_isWindows && File.Exists(scriptPath))
@@ -691,106 +706,42 @@ namespace AppiumBootstrapInstaller.Services
         }
 
         /// <summary>
-        /// Allocates N consecutive ports starting from a 4-digit port
+        /// Allocates consecutive ports for Appium services using the PortManager.
         /// </summary>
-        private async Task<int[]?> AllocateConsecutivePortsAsync(int count)
+        public async Task<int[]?> AllocateConsecutivePortsAsync(int count)
         {
-            await _portLock.WaitAsync();
-            try
+            var ports = await _portManager.AllocateConsecutivePortsAsync(count);
+            
+            if (ports == null)
             {
-                // Start from 4-digit range (1000-9999)
-                const int minPort = 1000;
-                const int maxPort = 65535 - 10; // Leave room for consecutive ports
-
-                // Try to find consecutive available ports
-                for (int startPort = minPort; startPort <= maxPort; startPort++)
-                {
-                    // Check if this port and the next (count-1) ports are all available
-                    bool allAvailable = true;
-                    var portsToCheck = new int[count];
-                    
-                    for (int i = 0; i < count; i++)
-                    {
-                        int port = startPort + i;
-                        portsToCheck[i] = port;
-                        
-                        if (_usedPorts.Contains(port) || !IsPortAvailable(port))
-                        {
-                            allAvailable = false;
-                            break;
-                        }
-                    }
-
-                    if (allAvailable)
-                    {
-                        // Reserve all ports
-                        foreach (var port in portsToCheck)
-                        {
-                            _usedPorts.Add(port);
-                        }
-
-                        _logger.LogInformation(
-                            "Allocated {Count} consecutive ports starting at {StartPort}: {Ports}",
-                            count, startPort, string.Join(", ", portsToCheck)
-                        );
-
-                        return portsToCheck;
-                    }
-                }
-                
                 _metrics.RecordPortAllocationFailure();
-                _logger.LogError(
-                    "No {Count} consecutive available ports found in range {Min}-{Max}",
-                    count, minPort, maxPort
-                );
-                return null;
             }
-            finally
-            {
-                _portLock.Release();
-            }
+            
+            return ports;
         }
 
         /// <summary>
-        /// Releases allocated ports back to the pool
+        /// Releases previously allocated ports back to the PortManager.
         /// </summary>
-        private async Task ReleasePortsAsync(int[] ports)
+        public async Task ReleasePortsAsync(int[] ports)
         {
-            await _portLock.WaitAsync();
-            try
-            {
-                foreach (var port in ports)
-                {
-                    _usedPorts.Remove(port);
-                }
-                
-                if (ports.Length > 0)
-                {
-                    _logger.LogDebug(
-                        "Released ports: {Ports}",
-                        string.Join(", ", ports)
-                    );
-                }
-            }
-            finally
-            {
-                _portLock.Release();
-            }
+            await _portManager.ReleasePortsAsync(ports);
         }
 
-        private bool IsPortAvailable(int port)
+        /// <summary>
+        /// Gets all currently allocated ports from the PortManager.
+        /// </summary>
+        public IReadOnlyList<int> GetAllocatedPorts()
         {
-            try
-            {
-                var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, port);
-                listener.Start();
-                listener.Stop();
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
+            return _portManager.GetAllocatedPorts();
+        }
+
+        /// <summary>
+        /// Checks if a specific port is in use via the PortManager.
+        /// </summary>
+        public bool IsPortInUse(int port)
+        {
+            return _portManager.IsPortInUse(port);
         }
     }
 }
