@@ -114,6 +114,9 @@ namespace AppiumBootstrapInstaller
                     return await RunDeviceListenerAsync(serviceProvider, config, logger);
                 }
 
+                // Acquire a folder-level lock to prevent concurrent installers
+                using var installLock = AcquireInstallFolderLock(config.InstallFolder, logger, TimeSpan.FromSeconds(30));
+
                 // Clean installation folder before starting (if configured)
                 if (!options.DryRun && config.CleanInstallFolder)
                 {
@@ -154,6 +157,53 @@ namespace AppiumBootstrapInstaller
                 logger.LogWarning("  STEP 1/2 COMPLETED: Dependencies Installed Successfully");
                 logger.LogWarning("==========================================");
 
+                // Default behavior: if device listener is enabled in config, run it
+                // inline (in-process) immediately after dependencies are installed.
+                // This avoids creating a separate service and reduces complexity
+                // for non-admin installs. If later you want a persistent service,
+                // we can add an explicit opt-in flag to create one.
+                if (config.EnableDeviceListener)
+                {
+                    logger.LogInformation("");
+                    logger.LogInformation("Device listener is enabled; starting listener in-process (default behavior). Skipping service setup.");
+                    // Ensure Platform scripts are available in the install folder so
+                    // StartAppiumServer.ps1 and related runtime scripts exist when
+                    // the device listener attempts to start Appium sessions.
+                    try
+                    {
+                        // Prefer the discovered platform scripts path (may be in a parent publish folder)
+                        var platformSource = platformScriptsPath;
+                        var platformDest = Path.Combine(config.InstallFolder, "Platform");
+
+                        if (!string.IsNullOrEmpty(platformSource) && Directory.Exists(platformSource))
+                        {
+                            logger.LogInformation("Copying Platform scripts to installation folder before starting listener...");
+                            CopyDirectory(platformSource, platformDest, recursive: true);
+                            logger.LogInformation("Platform scripts copied to: {Destination}", platformDest);
+                        }
+                        else
+                        {
+                            logger.LogWarning("Platform directory not found at: {Source}. Device listener may not be able to start Appium servers.", platformSource ?? "(null)");
+                        }
+
+                        // Verify StartAppiumServer script existence for the current OS
+                        if (RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
+                        {
+                            string startScript = Path.Combine(platformDest, "Windows", "Scripts", "StartAppiumServer.ps1");
+                            if (!File.Exists(startScript))
+                            {
+                                logger.LogWarning("Appium startup script not found at: {Script}. Device listener will retry starting sessions but Appium may fail.", startScript);
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogWarning(ex, "Failed to copy Platform scripts before starting device listener");
+                    }
+
+                    return await RunDeviceListenerAsync(serviceProvider, config, logger);
+                }
+
                 // ============================================
                 // STEP 2: Service Setup
                 // ============================================
@@ -166,10 +216,47 @@ namespace AppiumBootstrapInstaller
                 logger.LogInformation("Service setup script: {ScriptPath}", serviceSetupScriptPath);
 
                 // Service setup scripts accept optional install directory but can run without arguments
-                // Pass install folder as argument for consistency
+                // Pass install folder as argument for consistency. Also pass a best-effort path to the published exe
+                string exeCandidate = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, System.Reflection.Assembly.GetEntryAssembly()?.GetName().Name + ".exe");
                 string serviceSetupArgs = currentOS == ScriptExecutor.OperatingSystem.Windows
-                    ? $"-InstallDir \"{config.InstallFolder}\""
+                    ? $"-InstallDir \"{config.InstallFolder}\" -ExeSource \"{exeCandidate}\""
                     : $"\"{config.InstallFolder}\"";
+
+                // Ensure the running executable is available in the install folder so ServiceSetup can create the agent wrapper
+                    try
+                    {
+                        string[] candidateSources = new[] {
+                            System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName,
+                            System.Reflection.Assembly.GetEntryAssembly()?.Location,
+                            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, System.Reflection.Assembly.GetEntryAssembly()?.GetName().Name + ".exe"),
+                            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, AppDomain.CurrentDomain.FriendlyName)
+                        };
+
+                        string found = null;
+                        foreach (var candidate in candidateSources)
+                        {
+                            if (!string.IsNullOrEmpty(candidate) && File.Exists(candidate))
+                            {
+                                found = candidate;
+                                break;
+                            }
+                        }
+
+                        if (!string.IsNullOrEmpty(found))
+                        {
+                            var exeDest = Path.Combine(config.InstallFolder, Path.GetFileName(found));
+                            File.Copy(found, exeDest, true);
+                            logger.LogInformation("Copied executable to: {ExeDest}", exeDest);
+                        }
+                        else
+                        {
+                            logger.LogDebug("No executable file found among candidates; skipping copy to install folder");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogWarning(ex, "Could not copy running executable to install folder");
+                    }
 
                 int serviceSetupExitCode = executor.ExecuteScript(serviceSetupScriptPath, serviceSetupArgs, options.DryRun);
 
@@ -211,21 +298,10 @@ namespace AppiumBootstrapInstaller
                     logger.LogWarning(ex, "Failed to copy Platform scripts");
                 }
 
-                // ============================================
-                // STEP 3: Start Device Listener (if enabled)
-                // ============================================
-                if (config.EnableDeviceListener)
-                {
-                    logger.LogInformation("");
-                    logger.LogInformation("==========================================");
-                    logger.LogInformation("  STEP 3/3: Starting Device Listener");
-                    logger.LogInformation("==========================================");
-                    logger.LogInformation("Device listener is enabled in configuration.");
-                    logger.LogInformation("Starting automatic device monitoring and Appium session management...");
-                    logger.LogInformation("");
-                    
-                    return await RunDeviceListenerAsync(serviceProvider, config, logger);
-                }
+                // NOTE: Device listener is started inline by default after dependency
+                // installation above when `EnableDeviceListener` is true. We do not
+                // start it here because this code path is for after service setup
+                // which we skip for inline default behavior.
 
                 // ============================================
                 // ALL STEPS COMPLETED (without device listener)
@@ -270,6 +346,45 @@ namespace AppiumBootstrapInstaller
             {
                 Log.CloseAndFlush();
             }
+        }
+
+        private static FileStream AcquireInstallFolderLock(string installFolder, Microsoft.Extensions.Logging.ILogger logger, TimeSpan timeout)
+        {
+            // Ensure install folder exists so we can place a lock file inside it
+            try
+            {
+                Directory.CreateDirectory(installFolder);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Could not create install folder to acquire lock");
+                throw;
+            }
+
+            string lockPath = Path.Combine(installFolder, ".install.lock");
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            while (sw.Elapsed < timeout)
+            {
+                try
+                {
+                    // Open the file exclusively. This will fail if another process holds it.
+                    var fs = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                    // Write basic info to the lock file to aid debugging
+                    fs.SetLength(0);
+                    var info = System.Text.Encoding.UTF8.GetBytes($"PID:{Environment.ProcessId}\nAcquired:{DateTime.UtcNow:O}\n");
+                    fs.Write(info, 0, info.Length);
+                    fs.Flush(true);
+                    logger.LogInformation("Acquired install-folder lock: {LockPath}", lockPath);
+                    return fs;
+                }
+                catch (IOException)
+                {
+                    logger.LogWarning("Install folder appears locked by another installer. Waiting to acquire lock...");
+                    Thread.Sleep(1000);
+                }
+            }
+
+            throw new TimeoutException($"Timed out waiting to acquire install-folder lock at {lockPath}");
         }
 
         private static void ConfigureServices(IServiceCollection services)

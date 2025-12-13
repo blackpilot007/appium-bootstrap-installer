@@ -44,6 +44,9 @@ namespace AppiumBootstrapInstaller.Models
         [JsonPropertyName("enableDeviceListener")]
         public bool EnableDeviceListener { get; set; } = false;
 
+        // NOTE: Previously had a RunDeviceListenerInline flag. Inline device listener
+        // behavior is now the default when `enableDeviceListener` is true, so no
+        // separate flag is required.
         [JsonPropertyName("deviceListenerPollInterval")]
         public int DeviceListenerPollInterval { get; set; } = 5;
 

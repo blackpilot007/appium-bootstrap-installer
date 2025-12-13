@@ -226,245 +226,121 @@ function Install-Chocolatey {
 }
 
 # Install NVM for Windows (portable, no-install version) - no GUI, no admin required
-function Install-NVM {
-    Write-Log "================================================================" "INF"
-    Write-Log "               STARTING NVM INSTALLATION                        " "INF"
-    Write-Log "================================================================" "INF"
-    
-    $nvmPath = "$InstallFolder\nvm"
-    $nvmExe = "$nvmPath\nvm.exe"
-    $nodejsPath = "$nvmPath\nodejs"
-    $Script:ActiveNodePath = $nodejsPath
-
-    # Check if NVM is already installed
-    if (Test-Path $nvmExe) {
-        Write-Log "NVM is already installed at $nvmPath"
-        $version = & $nvmExe version 2>&1 | Out-String
-        Write-Log "NVM version: $version"
-        Write-Success "NVM ALREADY INSTALLED"
-        return
-    }
-    
-    Write-Log "Installing NVM for Windows (portable, no-install version) - no GUI, no admin required..."
-    
-    try {
-        # Get latest nvm-windows release from GitHub
-        Write-Log "Fetching latest nvm-windows release from GitHub..."
-        $releaseUrl = "https://api.github.com/repos/coreybutler/nvm-windows/releases/latest"
-        $release = Invoke-RestMethod -Uri $releaseUrl -UseBasicParsing
-        
-        # Find nvm-noinstall.zip asset
-        $asset = $release.assets | Where-Object { $_.name -eq "nvm-noinstall.zip" } | Select-Object -First 1
-        
-        if (-not $asset) {
-            $available = ($release.assets | Select-Object -ExpandProperty name) -join ", "
-            throw "Could not find nvm-noinstall.zip in latest nvm-windows release. Available assets: $available"
-        }
-        
-        $downloadUrl = $asset.browser_download_url
-        $nvmZipPath = "$env:TEMP\nvm-noinstall.zip"
-        
-        Write-Log "Downloading nvm-noinstall.zip from $downloadUrl..."
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $nvmZipPath -UseBasicParsing
-        
-        # Create NVM directory
-        if (-not (Test-Path $nvmPath)) {
-            New-Item -ItemType Directory -Path $nvmPath -Force | Out-Null
-        }
-        
-        # Extract NVM
-        Write-Log "Extracting NVM to $nvmPath..."
-        Expand-Archive -Path $nvmZipPath -DestinationPath $nvmPath -Force
-        
-        # Verify nvm.exe exists
-        if (-not (Test-Path $nvmExe)) {
-            throw "nvm.exe not found after extraction"
-        }
-        
-        # DO NOT create nodejs folder manually - we copy Node.js files here (no symlink = no admin required)
-        # Using 'nvm use' would create a symlink/junction which requires admin privileges on Windows
-        
-        # Create settings.txt for NVM configuration
-        $settingsContent = @"
-root: $nvmPath
-path: $nodejsPath
-arch: 64
-proxy: none
-"@
-        $settingsPath = "$nvmPath\settings.txt"
-        Set-Content -Path $settingsPath -Value $settingsContent -Encoding ASCII
-        Write-Log "Created settings.txt at $settingsPath"
-        
-        # Set environment variables for current session (nodejs path will be added after nvm use)
-        # PREPEND to PATH to ensure local installation takes precedence over global
-        $env:NVM_HOME = $nvmPath
-        $env:NVM_SYMLINK = $nodejsPath
-        $env:Path = "$nvmPath;$env:Path"
-        
-        # Clean up
-        if (Test-Path $nvmZipPath) {
-            Remove-Item -Path $nvmZipPath -Force -ErrorAction SilentlyContinue
-        }
-        
-        Write-Log "NVM installed successfully at $nvmPath"
-        Write-Log "No GUI prompts, no admin required, fully portable"
-        Write-Success "NVM INSTALLATION"
-    }
-    catch {
-        Write-ErrorMessage "NVM INSTALLATION"
-        Write-Log "Error: $_" "ERR"
-        throw
-    }
-}
-
-# Install Node.js using NVM
+# Install Node.js Portable (direct download - no NVM, no admin required)
 function Install-NodeJS {
     Write-Log "================================================================" "INF"
     Write-Log "               STARTING NODE.JS INSTALLATION                    " "INF"
     Write-Log "================================================================" "INF"
     
-    $nvmPath = "$InstallFolder\nvm"
-    $nvmExe = "$nvmPath\nvm.exe"
-    $nodejsPath = "$nvmPath\nodejs"
-    
-    if (-not (Test-Path $nvmExe)) {
-        Write-Log "NVM not found. Installing NVM first..." "WARN"
-        Install-NVM
-    }
-    
-    # Set NVM environment for this session (nodejs path added after successful nvm use)
-    # PREPEND to ensure local NVM takes precedence
-    $env:NVM_HOME = $nvmPath
-    $env:NVM_SYMLINK = $nodejsPath
-    $env:Path = "$nvmPath;$env:Path"
-    
-    # Check if Node.js version is already installed
-    $output = & $nvmExe list 2>&1 | Out-String
-    $nodeInstalled = $output -match "v?$NodeVersion"
-    
-    if ($nodeInstalled) {
-        Write-Log "Node.js version $NodeVersion is already installed"
+    $nodejsPath = "$InstallFolder\nodejs"
+    $Script:ActiveNodePath = $nodejsPath
+
+    # Check if Node.js is already installed
+    if (Test-Path "$nodejsPath\node.exe") {
+        $existingVersion = & "$nodejsPath\node.exe" --version 2>&1
+        Write-Log "Node.js is already installed at $nodejsPath"
+        Write-Log "Existing version: $existingVersion"
         
-        # Find the installed version directory (no-admin approach: copy instead of symlink)
-        # NVM stores versions as v{major}.{minor}.{patch} under nvm root
-        $versionPattern = "v$NodeVersion.*"
-        $installedVersion = Get-ChildItem -Path $nvmPath -Directory | Where-Object { $_.Name -match "^v$NodeVersion\." } | Select-Object -First 1
-        
-        if ($installedVersion) {
-            $sourceDir = $installedVersion.FullName
-            Write-Log "Found installed Node.js at: $sourceDir"
-            
-            # Instead of 'nvm use' (which creates admin-requiring symlink), copy to nodejs folder
-            if (Test-Path $nodejsPath) {
-                Write-Log "Removing existing nodejs directory..."
-                Remove-ItemWithRetries -Path $nodejsPath -Recurse -Force
-            }
-            
-            Write-Log "Copying Node.js from $sourceDir to $nodejsPath (no-admin approach)..."
-            Copy-Item -Path $sourceDir -Destination $nodejsPath -Recurse -Force
-            
-            # Verify node.exe exists
-            if (Test-Path "$nodejsPath\node.exe") {
-                $Script:ActiveNodePath = $nodejsPath
-                $env:Path = "$nodejsPath;$nvmPath;$env:Path"
-                $nodeVersionOutput = & "$nodejsPath\node.exe" --version
-                Write-Log "Node.js activated (no-admin): $nodeVersionOutput"
-            }
-            else {
-                Write-Log "Failed to copy Node.js files" "ERR"
-            }
+        # Check if it matches the requested major version
+        if ($existingVersion -match "^v$NodeVersion\.") {
+            Write-Log "Version matches requested Node.js $NodeVersion"
+            $env:Path = "$nodejsPath;$env:Path"
+            Write-Success "NODE.JS ALREADY INSTALLED"
+            return
         }
         else {
-            Write-Log "Could not locate installed Node.js version directory" "WARN"
-        }
-        
-        Write-Success "NODE.JS ALREADY INSTALLED"
-        return
-    }
-    
-    Write-Log "Installing Node.js version $NodeVersion using NVM..."
-    
-    try {
-        # NVM handles download and installation automatically (no GUI prompts)
-        Write-Log "Running: nvm install $NodeVersion"
-        $installOutput = & $nvmExe install $NodeVersion 2>&1 | Out-String
-        Write-Log "$installOutput"
-        
-        # Instead of 'nvm use' (requires admin for symlink), manually activate by copying
-        Write-Log "Activating Node.js $NodeVersion (no-admin approach: copy instead of symlink)..."
-        
-        # Find the installed version directory
-        $versionPattern = "v$NodeVersion.*"
-        $installedVersion = Get-ChildItem -Path $nvmPath -Directory | Where-Object { $_.Name -match "^v$NodeVersion\." } | Select-Object -First 1
-        
-        if (-not $installedVersion) {
-            # Try to list what was actually installed
-            $listOutput = & $nvmExe list 2>&1 | Out-String
-            Write-Log "NVM list output: $listOutput" "WARN"
-            throw "Could not find installed Node.js version directory matching v$NodeVersion.*"
-        }
-        
-        $sourceDir = $installedVersion.FullName
-        Write-Log "Found Node.js installation at: $sourceDir"
-        
-        # Remove existing nodejs directory if present
-        if (Test-Path $nodejsPath) {
-            Write-Log "Removing existing nodejs directory..."
+            Write-Log "Version mismatch. Removing existing installation..." "WARN"
             Remove-ItemWithRetries -Path $nodejsPath -Recurse -Force
         }
+    }
+    
+    Write-Log "Downloading Node.js $NodeVersion portable (no NVM, no admin required)..."
+    
+    try {
+        # Fetch latest version for the major release
+        Write-Log "Fetching Node.js release information from nodejs.org..."
+        $indexUrl = "https://nodejs.org/dist/index.json"
+        $releases = Invoke-RestMethod -Uri $indexUrl -UseBasicParsing
         
-        # Copy Node.js to nodejs folder (no symlink = no admin required)
-        Write-Log "Copying Node.js from $sourceDir to $nodejsPath..."
-        Copy-Item -Path $sourceDir -Destination $nodejsPath -Recurse -Force
+        # Find the latest version matching the major version
+        $targetRelease = $releases | Where-Object { $_.version -match "^v$NodeVersion\." } | Select-Object -First 1
         
-        # Wait for filesystem to settle
-        Start-Sleep -Milliseconds 500
-        
-        $versionDir = "$nodejsPath"
-        
-        if (Test-Path "$versionDir\node.exe") {
-            $nodePath = $versionDir
-            $Script:ActiveNodePath = $nodePath
-            Write-Log "Found Node.js in nodejs directory: $nodePath"
-            
-            # PREPEND to PATH to ensure local Node.js takes precedence over any global installation
-            $env:Path = "$nodePath;$nvmPath;$env:Path"
-        }
-        else {
-            Write-Log "Could not locate Node.js binary after copy operation" "ERR"
-            throw "Node.js binary not found at $versionDir\node.exe after copy"
+        if (-not $targetRelease) {
+            throw "Could not find Node.js version matching v$NodeVersion.*"
         }
         
-        if (Test-Path "$nodePath\node.exe") {
-            $nodeVersionOutput = & "$nodePath\node.exe" --version
-            Write-Log "Node.js version installed: $nodeVersionOutput"
-            
-            # NVM usually creates npm.cmd automatically, but verify
-            $npmCmd = Join-Path $nodePath 'npm.cmd'
-            if (-not (Test-Path $npmCmd)) {
-                $npmCli = Join-Path $nodePath 'node_modules\npm\bin\npm-cli.js'
-                if (Test-Path $npmCli) {
-                    Write-Log "Creating npm.cmd wrapper for non-admin install..."
-                    try {
-                        $nodeExePath = Join-Path $nodePath 'node.exe'
-                        $wrapperContent = "@echo off`r`n`"$nodeExePath`" `"$npmCli`" %*"
-                        Set-Content -Path $npmCmd -Value $wrapperContent -Encoding ASCII -Force
-                        Write-Log "npm.cmd wrapper created at $npmCmd"
-                    }
-                    catch {
-                        Write-Log "Failed to create npm.cmd wrapper: $_" "WARN"
-                    }
-                }
+        $nodeVersion = $targetRelease.version
+        Write-Log "Found Node.js version: $nodeVersion"
+        
+        # Download Node.js portable (win-x64 zip)
+        $downloadUrl = "https://nodejs.org/dist/$nodeVersion/node-$nodeVersion-win-x64.zip"
+        $zipPath = "$env:TEMP\node-$nodeVersion-win-x64.zip"
+        
+        Write-Log "Downloading from: $downloadUrl"
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $zipPath -UseBasicParsing
+        
+        # Extract Node.js
+        Write-Log "Extracting Node.js to $nodejsPath..."
+        $tempExtractPath = "$env:TEMP\node-extract-$([guid]::NewGuid())"
+        Expand-Archive -Path $zipPath -DestinationPath $tempExtractPath -Force
+        
+        # Move extracted folder to target location
+        # The zip contains a folder like "node-v22.21.1-win-x64"
+        $extractedFolder = Get-ChildItem -Path $tempExtractPath -Directory | Select-Object -First 1
+        
+        if (-not $extractedFolder) {
+            throw "Could not find extracted Node.js folder"
+        }
+        
+        # Create parent directory if needed
+        $parentDir = Split-Path -Parent $nodejsPath
+        if (-not (Test-Path $parentDir)) {
+            New-Item -ItemType Directory -Path $parentDir -Force | Out-Null
+        }
+        
+        # Move to final location
+        Move-Item -Path $extractedFolder.FullName -Destination $nodejsPath -Force
+        
+        # Verify node.exe exists
+        if (-not (Test-Path "$nodejsPath\node.exe")) {
+            throw "node.exe not found after extraction"
+        }
+        
+        # Verify npm exists
+        if (-not (Test-Path "$nodejsPath\npm.cmd")) {
+            Write-Log "npm.cmd not found, checking for npm-cli.js..." "WARN"
+            $npmCli = "$nodejsPath\node_modules\npm\bin\npm-cli.js"
+            if (Test-Path $npmCli) {
+                Write-Log "Creating npm.cmd wrapper..."
+                $npmCmd = "$nodejsPath\npm.cmd"
+                $wrapperContent = "@echo off`r`n`"$nodejsPath\node.exe`" `"$npmCli`" %*"
+                Set-Content -Path $npmCmd -Value $wrapperContent -Encoding ASCII -Force
             }
-            
-            # PREPEND node path to session PATH so local npm commands work (not global)
-            $env:Path = "$nodePath;$env:Path"
-            
-            Write-Success "NODE.JS INSTALLATION"
         }
-        else {
-            throw "Node.js binary not found after installation"
+        
+        # Set environment variables
+        $env:Path = "$nodejsPath;$env:Path"
+        
+        # Verify installation
+        $installedVersion = & "$nodejsPath\node.exe" --version
+        Write-Log "Node.js version installed: $installedVersion"
+        
+        $npmPath = Resolve-NpmPath -nodePath $nodejsPath
+        if ($npmPath) {
+            $npmVersion = & $npmPath --version
+            Write-Log "npm version: $npmVersion"
         }
+        
+        # Clean up
+        if (Test-Path $zipPath) {
+            Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
+        }
+        if (Test-Path $tempExtractPath) {
+            Remove-Item -Path $tempExtractPath -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        
+        Write-Log "Node.js installed successfully - portable, no NVM, no admin required"
+        Write-Success "NODE.JS INSTALLATION"
     }
     catch {
         Write-ErrorMessage "NODE.JS INSTALLATION"
@@ -714,7 +590,7 @@ function Install-AppiumDrivers {
                 if (-not $npmPath) { throw "npm not found for fallback installation" }
                 $driverPackage = "appium-${driverName}-driver"
                 Push-Location $appiumHome
-                Invoke-WithRetries { & $npmPath install "${driverPackage}@$driverVersion" --save --legacy-peer-deps --no-bin-links } -MaxAttempts 3 -DelayMs 400
+                Invoke-WithRetries { & $npmPath install "${driverPackage}@$driverVersion" --prefix $appiumHome --legacy-peer-deps --no-bin-links } -MaxAttempts 3 -DelayMs 400
                 Pop-Location
             }
             
@@ -842,7 +718,7 @@ function Install-AppiumPlugins {
                 $npmPath = Resolve-NpmPath -nodePath $nodePath
                 if (-not $npmPath) { throw "npm not found for fallback installation" }
                 Push-Location $appiumHome
-                Invoke-WithRetries { & $npmPath install "${pluginName}@$pluginVersion" --save --legacy-peer-deps --no-bin-links } -MaxAttempts 3 -DelayMs 400
+                Invoke-WithRetries { & $npmPath install "${pluginName}@$pluginVersion" --prefix $appiumHome --legacy-peer-deps --no-bin-links } -MaxAttempts 3 -DelayMs 400
                 Pop-Location
             }
             
@@ -1336,7 +1212,7 @@ function Copy-PlatformScripts {
     Write-Log "           COPYING PLATFORM SCRIPTS                             " "INF"
     Write-Log "================================================================" "INF"
     
-    $platformSourceDir = Join-Path (Split-Path $PSScriptRoot -Parent) "Platform"
+    $platformSourceDir = Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) "Platform"
     $platformDestDir = Join-Path $InstallFolder "Platform"
     
     # Check if source Platform directory exists (from publish folder)
@@ -1645,7 +1521,6 @@ try {
     Write-Log "================================================================" "INF"
     
     Install-Chocolatey
-    Install-NVM
     Install-NodeJS
     Install-Appium
     
@@ -1673,7 +1548,8 @@ try {
     if ($needsIOSSupport) {
         Write-Log "Installing iOS support components..."
         Install-ITunesDrivers
-        Install-LibimobileDevice
+        # Note: libimobiledevice not available via Chocolatey on Windows
+        # iTunes drivers + go-ios provide iOS device support
         Install-GoIos
     }
     

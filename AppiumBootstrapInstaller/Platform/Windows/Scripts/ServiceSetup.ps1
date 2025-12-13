@@ -3,7 +3,8 @@
 # Creates a Startup shortcut that runs the agent in listen mode via VBScript wrapper.
 
 param(
-    [string]$InstallDir = (Resolve-Path "$PSScriptRoot\..\..\..").Path
+    [string]$InstallDir = (Resolve-Path "$PSScriptRoot\..\..\..").Path,
+    [string]$ExeSource = ""
 )
 
 $ErrorActionPreference = "Continue"
@@ -67,8 +68,21 @@ function Setup-DeviceListenerAgent {
     $configPath = "$InstallDir\config.json"
     
     if (-not (Test-Path $exePath)) {
-        Write-Log "ERROR: Executable not found at $exePath" "ERR"
-        throw "AppiumBootstrapInstaller.exe not found"
+            Write-Log "Executable not found at $exePath, attempting to copy from ExeSource: $ExeSource" "WARN"
+            if ($ExeSource -and (Test-Path $ExeSource)) {
+                try {
+                    Copy-Item -Path $ExeSource -Destination $exePath -Force
+                    Write-Log "Copied executable from $ExeSource to $exePath"
+                }
+                catch {
+                    Write-Log "ERROR: Could not copy executable from $ExeSource to $exePath: $_" "ERR"
+                    throw "AppiumBootstrapInstaller.exe not found and could not be copied"
+                }
+            }
+            else {
+                Write-Log "ERROR: Executable not found at $exePath and no valid ExeSource provided" "ERR"
+                throw "AppiumBootstrapInstaller.exe not found"
+            }
     }
     
     # Create VBScript wrapper to run hidden (no console window)

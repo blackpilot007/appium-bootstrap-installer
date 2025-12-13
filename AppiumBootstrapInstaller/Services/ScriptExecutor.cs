@@ -17,6 +17,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Text.Json;
 using AppiumBootstrapInstaller.Models;
 using Microsoft.Extensions.Logging;
@@ -417,17 +418,46 @@ namespace AppiumBootstrapInstaller.Services
                     Arguments = processArguments,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
+                    StandardOutputEncoding = Encoding.UTF8,
+                    StandardErrorEncoding = Encoding.UTF8,
                     UseShellExecute = false,
                     CreateNoWindow = true
                 }
             };
 
+            // Force common no-color environment so child processes (npm, node, appium)
+            // emit minimal ANSI sequences. Many CLIs respect NO_COLOR and FORCE_COLOR.
+            try
+            {
+                process.StartInfo.EnvironmentVariables["NO_COLOR"] = "1";
+                process.StartInfo.EnvironmentVariables["FORCE_COLOR"] = "0";
+                process.StartInfo.EnvironmentVariables["TERM"] = "dumb";
+            }
+            catch
+            {
+                // EnvironmentVariables may throw in restricted environments; ignore
+            }
+
             // Stream output in real-time
+            // Regex to strip common ANSI escape sequences
+            var ansiRegex = new Regex(@"\x1B\[[0-9;]*[A-Za-z]", RegexOptions.Compiled);
+
+            string CleanOutput(string s)
+            {
+                if (string.IsNullOrEmpty(s)) return s;
+                // Remove ANSI sequences
+                var cleaned = ansiRegex.Replace(s, string.Empty);
+                // Remove other control characters except common whitespace
+                cleaned = Regex.Replace(cleaned, "[\x00-\x08\x0B\x0C\x0E-\x1F]", string.Empty);
+                return cleaned.Trim();
+            }
+
             process.OutputDataReceived += (sender, e) =>
             {
                 if (!string.IsNullOrEmpty(e.Data))
                 {
-                    _logger.LogInformation("{Output}", e.Data);
+                    var outLine = CleanOutput(e.Data);
+                    if (!string.IsNullOrEmpty(outLine)) _logger.LogInformation("{Output}", outLine);
                 }
             };
 
@@ -435,7 +465,8 @@ namespace AppiumBootstrapInstaller.Services
             {
                 if (!string.IsNullOrEmpty(e.Data))
                 {
-                    _logger.LogError("{Error}", e.Data);
+                    var errLine = CleanOutput(e.Data);
+                    if (!string.IsNullOrEmpty(errLine)) _logger.LogError("{Error}", errLine);
                 }
             };
 

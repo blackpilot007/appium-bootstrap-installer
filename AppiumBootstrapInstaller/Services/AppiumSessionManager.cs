@@ -405,7 +405,7 @@ namespace AppiumBootstrapInstaller.Services
                 var nodejsPath = Path.Combine(nvmPath, "nodejs");
                 var appiumBin = appiumHome; // Appium binaries are in appium-home
                 
-                // Get logs folder relative to executable
+                // Logs directory next to the running binary
                 var executableDir = AppDomain.CurrentDomain.BaseDirectory;
                 var logDir = Path.Combine(executableDir, "logs");
                 Directory.CreateDirectory(logDir);
@@ -470,27 +470,69 @@ namespace AppiumBootstrapInstaller.Services
                     WorkingDirectory = _installFolder
                 };
 
+                // Force UTF8 reading of child process output and reduce ANSI/colour
+                try
+                {
+                    psi.StandardOutputEncoding = Encoding.UTF8;
+                    psi.StandardErrorEncoding = Encoding.UTF8;
+                    psi.EnvironmentVariables["NO_COLOR"] = "1";
+                    psi.EnvironmentVariables["FORCE_COLOR"] = "0";
+                    psi.EnvironmentVariables["TERM"] = "dumb";
+                }
+                catch
+                {
+                    // Best-effort; ignore if environment modifications are not allowed
+                }
+
                 // No environment variables needed - using fully qualified paths in scripts
                 
                 _logger.LogInformation("Starting Appium process for {DeviceName} on port {Port}", device.Name, appiumPort);
                 
                 var process = new Process { StartInfo = psi };
                 
-                // Redirect output to log files
-                var stdoutLog = Path.Combine(logDir, $"{serviceName}_stdout.log");
-                var stderrLog = Path.Combine(logDir, $"{serviceName}_stderr.log");
+                var serviceLogDir = Path.Combine(logDir, serviceName);
+                Directory.CreateDirectory(serviceLogDir);
+
+                var stdoutLog = Path.Combine(serviceLogDir, "stdout.log");
+                var stderrLog = Path.Combine(serviceLogDir, "stderr.log");
+                var sessionJsonPath = Path.Combine(serviceLogDir, "session.json");
                 
-                process.OutputDataReceived += (sender, e) => 
+                // Strip ANSI sequences and control characters before writing logs
+                var ansiRegex = new System.Text.RegularExpressions.Regex("\\x1B\\[[0-9;]*[A-Za-z]", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+                string CleanLine(string s)
                 {
-                    if (e.Data != null) File.AppendAllText(stdoutLog, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {e.Data}{Environment.NewLine}");
-                };
-                
-                process.ErrorDataReceived += (sender, e) => 
+                    if (string.IsNullOrEmpty(s)) return s;
+                    var cleaned = ansiRegex.Replace(s, string.Empty);
+                    cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, "[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]", string.Empty);
+                    return cleaned.Trim();
+                }
+
+                process.OutputDataReceived += (sender, e) =>
                 {
-                    if (e.Data != null) File.AppendAllText(stderrLog, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {e.Data}{Environment.NewLine}");
+                    if (e.Data != null)
+                    {
+                        var line = CleanLine(e.Data);
+                        if (!string.IsNullOrEmpty(line))
+                        {
+                            File.AppendAllText(stdoutLog, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {line}{Environment.NewLine}", Encoding.UTF8);
+                        }
+                    }
                 };
 
-                if (process.Start())
+                process.ErrorDataReceived += (sender, e) =>
+                {
+                    if (e.Data != null)
+                    {
+                        var line = CleanLine(e.Data);
+                        if (!string.IsNullOrEmpty(line))
+                        {
+                            File.AppendAllText(stderrLog, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {line}{Environment.NewLine}", Encoding.UTF8);
+                        }
+                    }
+                };
+
+                    if (process.Start())
                 {
                     process.BeginOutputReadLine();
                     process.BeginErrorReadLine();
@@ -508,7 +550,31 @@ namespace AppiumBootstrapInstaller.Services
                         }
                     });
                     
-                    return true;
+                        try
+                        {
+                            var metadata = new
+                            {
+                                ServiceName = serviceName,
+                                DeviceId = device.Id,
+                                DeviceName = device.Name,
+                                Platform = device.Platform.ToString(),
+                                AppiumPort = appiumPort,
+                                WdaLocalPort = wdaPort,
+                                MjpegServerPort = mjpegPort,
+                                SystemPort = systemPort,
+                                ProcessId = process.Id,
+                                StartedAt = DateTime.UtcNow.ToString("o")
+                            };
+
+                            var json = System.Text.Json.JsonSerializer.Serialize(metadata, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+                            File.WriteAllText(sessionJsonPath, json, Encoding.UTF8);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to write session metadata for {ServiceName}", serviceName);
+                        }
+
+                        return true;
                 }
                 
                 return false;

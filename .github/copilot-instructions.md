@@ -15,7 +15,7 @@
 - **Logging**: Serilog with structured logging
 - **Config Format**: JSON with JSON serialization context
 - **Node.js Management**:
-  - **Windows**: `nvm-windows` (portable, no-install version) - no admin required
+  - **Windows**: Direct portable download from nodejs.org - no NVM, no admin required
   - **macOS/Linux**: `nvm` (Node Version Manager) - standard shell-based
 
 ### Key Components
@@ -69,12 +69,13 @@ catch {
 $errorMsg = $_.Exception.Message
 Write-Log "Error: $errorMsg" "ERR"
 
-# Initialize environment for nvm-windows (no-admin approach)
-$env:NVM_HOME = $nvmPath
-$env:Path = "$nodejsPath;$nvmPath;$env:Path"
-
-# Copy Node.js instead of using 'nvm use' (avoids admin-required symlinks)
-Copy-Item -Path "$nvmPath\v$NodeVersion.*" -Destination $nodejsPath -Recurse -Force
+# Download Node.js portable directly from nodejs.org (no NVM needed)
+$indexUrl = "https://nodejs.org/dist/index.json"
+$releases = Invoke-RestMethod -Uri $indexUrl -UseBasicParsing
+$targetRelease = $releases | Where-Object { $_.version -match "^v$NodeVersion\." } | Select-Object -First 1
+$downloadUrl = "https://nodejs.org/dist/$($targetRelease.version)/node-$($targetRelease.version)-win-x64.zip"
+Invoke-WebRequest -Uri $downloadUrl -OutFile $zipPath -UseBasicParsing
+Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
 ```
 
 ### Bash Script Standards
@@ -104,9 +105,8 @@ export NVM_DIR="$INSTALL_FOLDER/.nvm"
 
 ### Environment Variables
 - **APPIUM_HOME**: Points to appium-home directory for drivers/plugins
-- **NVM_HOME**: (Windows) nvm installation directory
 - **NVM_DIR**: (macOS/Linux) nvm installation directory
-- **Path**: Must include nodejs directory (copied files, not symlink)
+- **Path**: Must include nodejs directory (portable download)
 
 ## Common Tasks
 
@@ -188,27 +188,16 @@ AppiumBootstrapInstaller/
 
 ## Troubleshooting Guide
 
-### Windows NVM Issues
-**Problem**: "ERROR open \settings.txt: The system cannot find the file specified"
+### Windows Node.js Issues
+**Problem**: "Node.js version not found"
 ```powershell
-# Solution: Ensure settings.txt exists in NVM_HOME and environment variable is set
-$settingsContent = @"
-root: $nvmPath
-path: $nodejsPath
-arch: 64
-proxy: none
-"@
-Set-Content -Path "$nvmPath\settings.txt" -Value $settingsContent -Encoding ASCII
-$env:NVM_HOME = $nvmPath
-```
-
-**Problem**: "nvm use" prompts for UAC/admin access
-```powershell
-# Solution: Copy Node.js files instead of using symlinks (no admin required)
-$sourceDir = Get-ChildItem -Path $nvmPath -Directory | Where-Object { $_.Name -match "^v$NodeVersion\." } | Select-Object -First 1
-if (Test-Path $nodejsPath) { Remove-ItemWithRetries -Path $nodejsPath -Recurse -Force }
-Copy-Item -Path $sourceDir.FullName -Destination $nodejsPath -Recurse -Force
-# This avoids symlink/junction creation which requires admin privileges on Windows
+# Solution: Verify download URL and extraction
+$indexUrl = "https://nodejs.org/dist/index.json"
+$releases = Invoke-RestMethod -Uri $indexUrl -UseBasicParsing
+$targetRelease = $releases | Where-Object { $_.version -match "^v$NodeVersion\." } | Select-Object -First 1
+if (-not $targetRelease) {
+    throw "Could not find Node.js version matching v$NodeVersion.*"
+}
 ```
 
 **Problem**: "Appium binary not found after installation"
@@ -294,7 +283,7 @@ test: Add device listener integration tests
 ### Do NOT
 - ❌ Use system services (NSSM/Servy/Systemd) in default flow
 - ❌ Require administrator/sudo privileges
-- ❌ Use `nvm use` on Windows (creates admin-requiring symlinks)
+- ❌ Use NVM on Windows (unnecessary - download Node.js portable directly)
 - ❌ Use deprecated npm configs like `global-style`
 - ❌ Expect `.bin` directory when using `--no-bin-links`
 - ❌ Install globally unless explicitly configured
@@ -303,7 +292,7 @@ test: Add device listener integration tests
 
 ### DO
 - ✅ Support portable, non-admin installation
-- ✅ Copy Node.js files instead of creating symlinks (Windows)
+- ✅ Download Node.js portable directly from nodejs.org (Windows)
 - ✅ Use `--no-bin-links` flag for npm install operations
 - ✅ Check for `main.js` when locating Appium binary
 - ✅ Use child processes for Appium servers
@@ -312,7 +301,7 @@ test: Add device listener integration tests
 - ✅ Test on all target platforms
 - ✅ Handle transient failures with retry logic
 - ✅ Document configuration options
-- ✅ Use `nvm-windows` (portable) on Windows, `nvm` on Unix
+- ✅ Use `nvm` on Unix platforms (macOS/Linux)
 - ✅ Provide detailed diagnostic output when installations fail
 
 ## Questions?
