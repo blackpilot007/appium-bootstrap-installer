@@ -41,9 +41,10 @@
     ],
     "plugins": [
         {
-            "name": "@appium/device-farm-plugin",
+            "name": "appium-device-farm",
             "version": "8.3.5",
-            "enabled": true
+            "enabled": true,
+            "_comment": "Device farm plugin for managing device pools and parallel testing"
         },
         {
             "name": "appium-dashboard",

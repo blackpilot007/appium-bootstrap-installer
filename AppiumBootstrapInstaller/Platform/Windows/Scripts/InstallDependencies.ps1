@@ -281,8 +281,8 @@ function Install-NVM {
             throw "nvm.exe not found after extraction"
         }
         
-        # DO NOT create nodejs folder manually - NVM will create it as a symlink/junction during 'nvm use'
-        # Pre-creating it as a directory causes "activation error: NVM_SYMLINK is set to a physical file/directory"
+        # DO NOT create nodejs folder manually - we copy Node.js files here (no symlink = no admin required)
+        # Using 'nvm use' would create a symlink/junction which requires admin privileges on Windows
         
         # Create settings.txt for NVM configuration
         $settingsContent = @"
@@ -344,13 +344,40 @@ function Install-NodeJS {
     
     if ($nodeInstalled) {
         Write-Log "Node.js version $NodeVersion is already installed"
-        try {
-            & $nvmExe use $NodeVersion
+        
+        # Find the installed version directory (no-admin approach: copy instead of symlink)
+        # NVM stores versions as v{major}.{minor}.{patch} under nvm root
+        $versionPattern = "v$NodeVersion.*"
+        $installedVersion = Get-ChildItem -Path $nvmPath -Directory | Where-Object { $_.Name -match "^v$NodeVersion\." } | Select-Object -First 1
+        
+        if ($installedVersion) {
+            $sourceDir = $installedVersion.FullName
+            Write-Log "Found installed Node.js at: $sourceDir"
+            
+            # Instead of 'nvm use' (which creates admin-requiring symlink), copy to nodejs folder
+            if (Test-Path $nodejsPath) {
+                Write-Log "Removing existing nodejs directory..."
+                Remove-ItemWithRetries -Path $nodejsPath -Recurse -Force
+            }
+            
+            Write-Log "Copying Node.js from $sourceDir to $nodejsPath (no-admin approach)..."
+            Copy-Item -Path $sourceDir -Destination $nodejsPath -Recurse -Force
+            
+            # Verify node.exe exists
+            if (Test-Path "$nodejsPath\node.exe") {
+                $Script:ActiveNodePath = $nodejsPath
+                $env:Path = "$nodejsPath;$nvmPath;$env:Path"
+                $nodeVersionOutput = & "$nodejsPath\node.exe" --version
+                Write-Log "Node.js activated (no-admin): $nodeVersionOutput"
+            }
+            else {
+                Write-Log "Failed to copy Node.js files" "ERR"
+            }
         }
-        catch {
-            $errorMsg = $_.Exception.Message
-            Write-Log "Could not switch to Node.js ${NodeVersion}: $errorMsg" "WARN"
+        else {
+            Write-Log "Could not locate installed Node.js version directory" "WARN"
         }
+        
         Write-Success "NODE.JS ALREADY INSTALLED"
         return
     }
@@ -363,17 +390,34 @@ function Install-NodeJS {
         $installOutput = & $nvmExe install $NodeVersion 2>&1 | Out-String
         Write-Log "$installOutput"
         
-        Write-Log "Setting Node.js $NodeVersion as active version..."
-        $useOutput = & $nvmExe use $NodeVersion 2>&1 | Out-String
-        Write-Log "$useOutput"
+        # Instead of 'nvm use' (requires admin for symlink), manually activate by copying
+        Write-Log "Activating Node.js $NodeVersion (no-admin approach: copy instead of symlink)..."
         
-        # Check if nvm use command succeeded (it creates symlink/junction at nodejs path)
-        if ($useOutput -match "activation error" -or $useOutput -match "error") {
-            throw "NVM use command failed: $useOutput"
+        # Find the installed version directory
+        $versionPattern = "v$NodeVersion.*"
+        $installedVersion = Get-ChildItem -Path $nvmPath -Directory | Where-Object { $_.Name -match "^v$NodeVersion\." } | Select-Object -First 1
+        
+        if (-not $installedVersion) {
+            # Try to list what was actually installed
+            $listOutput = & $nvmExe list 2>&1 | Out-String
+            Write-Log "NVM list output: $listOutput" "WARN"
+            throw "Could not find installed Node.js version directory matching v$NodeVersion.*"
         }
         
-        # NVM creates symlink/junction in nodejs folder pointing to active version
-        # Wait a moment for the symlink to be created
+        $sourceDir = $installedVersion.FullName
+        Write-Log "Found Node.js installation at: $sourceDir"
+        
+        # Remove existing nodejs directory if present
+        if (Test-Path $nodejsPath) {
+            Write-Log "Removing existing nodejs directory..."
+            Remove-ItemWithRetries -Path $nodejsPath -Recurse -Force
+        }
+        
+        # Copy Node.js to nodejs folder (no symlink = no admin required)
+        Write-Log "Copying Node.js from $sourceDir to $nodejsPath..."
+        Copy-Item -Path $sourceDir -Destination $nodejsPath -Recurse -Force
+        
+        # Wait for filesystem to settle
         Start-Sleep -Milliseconds 500
         
         $versionDir = "$nodejsPath"
@@ -381,16 +425,14 @@ function Install-NodeJS {
         if (Test-Path "$versionDir\node.exe") {
             $nodePath = $versionDir
             $Script:ActiveNodePath = $nodePath
-            Write-Log "Found Node.js in NVM nodejs directory: $nodePath"
+            Write-Log "Found Node.js in nodejs directory: $nodePath"
             
             # PREPEND to PATH to ensure local Node.js takes precedence over any global installation
             $env:Path = "$nodePath;$nvmPath;$env:Path"
         }
         else {
-            Write-Log "Could not locate Node.js binary after NVM install" "WARN"
-            # Try to list installed versions
-            $listOutput = & $nvmExe list 2>&1 | Out-String
-            Write-Log "NVM list output: $listOutput" "WARN"
+            Write-Log "Could not locate Node.js binary after copy operation" "ERR"
+            throw "Node.js binary not found at $versionDir\node.exe after copy"
         }
         
         if (Test-Path "$nodePath\node.exe") {
@@ -464,7 +506,7 @@ function Install-Appium {
     Write-Log "Configuring npm for non-admin operation..."
     & $npmPath config set prefix "$appiumHome" --location user
     & $npmPath config set bin-links false --location user
-    & $npmPath config set global-style false --location user
+    # Note: global-style is deprecated in npm 10+, no longer configuring it
     
     Write-Log "Installing Appium $AppiumVersion..."
     
@@ -488,8 +530,43 @@ function Install-Appium {
         Pop-Location
         
         # Verify Appium installation
+        # With --no-bin-links, .bin directory is not created, use main.js directly
+        $appiumMainJs = "$appiumHome\node_modules\appium\build\lib\main.js"
         $appiumExe = "$appiumHome\node_modules\.bin\appium.cmd"
-        if (Test-Path $appiumExe) {
+        
+        # Check both locations (bin links might exist in some scenarios)
+        if (Test-Path $appiumMainJs) {
+            Write-Log "Found Appium at: $appiumMainJs"
+            $appiumVersionOutput = & "$nodePath\node.exe" $appiumMainJs --version
+            Write-Log "Appium version installed: $appiumVersionOutput"
+            
+            # Detect major version for configuration
+            $appiumMajorVersion = $appiumVersionOutput.Split('.')[0]
+            
+            # Create proper configuration based on Appium version
+            if ($appiumMajorVersion -eq "3") {
+                Write-Log "Creating Appium 3.x configuration..."
+                $appiumConfigDir = "$env:USERPROFILE\.appium"
+                if (-not (Test-Path $appiumConfigDir)) {
+                    New-Item -ItemType Directory -Path $appiumConfigDir -Force | Out-Null
+                }
+                # For Appium 3.x: use extensionPaths.base (not appium_home)
+                $config = @{
+                    extensionPaths = @{
+                        base = $appiumHome
+                    }
+                } | ConvertTo-Json -Depth 10
+                $config | Out-File -FilePath "$appiumConfigDir\config.json" -Encoding utf8
+                Write-Log "Created Appium 3.x config with extensionPaths.base"
+            }
+            else {
+                Write-Log "Appium 2.x detected - using default configuration"
+            }
+            
+            Write-Success "APPIUM INSTALLATION"
+        }
+        elseif (Test-Path $appiumExe) {
+            Write-Log "Found Appium at: $appiumExe"
             $appiumVersionOutput = & $appiumExe --version
             Write-Log "Appium version installed: $appiumVersionOutput"
             
@@ -519,6 +596,16 @@ function Install-Appium {
             Write-Success "APPIUM INSTALLATION"
         }
         else {
+            $checkPaths = @(
+                "$appiumHome\node_modules\appium\build\lib\main.js",
+                "$appiumHome\node_modules\.bin\appium.cmd",
+                "$appiumHome\node_modules\appium"
+            )
+            Write-Log "Appium binary not found. Checked paths:" "ERR"
+            foreach ($path in $checkPaths) {
+                $exists = Test-Path $path
+                Write-Log "  - $path : $exists" "ERR"
+            }
             throw "Appium binary not found after installation"
         }
     }
@@ -557,17 +644,16 @@ function Install-AppiumDrivers {
     }
     
     $appiumHome = "$InstallFolder\appium-home"
-    $appiumExe = "$appiumHome\node_modules\.bin\appium.cmd"
+    $appiumScript = "$appiumHome\node_modules\appium\build\lib\main.js"
     
-    if (-not (Test-Path $appiumExe)) {
-        Write-Log "Appium not found. Installing Appium first..." "WARN"
+    if (-not (Test-Path $appiumScript)) {
+        Write-Log "Appium not found at $appiumScript. Installing Appium first..." "WARN"
         Install-Appium
     }
     
     $env:APPIUM_HOME = $appiumHome
     
-    # Detect Appium version
-    $appiumScript = "$appiumHome\node_modules\appium\build\lib\main.js"
+    # Get Node.js path
     $nodePath = "$InstallFolder\nodejs"
     if ($Script:ActiveNodePath) { $nodePath = $Script:ActiveNodePath }
     
@@ -687,17 +773,16 @@ function Install-AppiumPlugins {
     }
     
     $appiumHome = "$InstallFolder\appium-home"
-    $appiumExe = "$appiumHome\node_modules\.bin\appium.cmd"
+    $appiumScript = "$appiumHome\node_modules\appium\build\lib\main.js"
     
-    if (-not (Test-Path $appiumExe)) {
-        Write-Log "Appium not found. Installing Appium first..." "WARN"
+    if (-not (Test-Path $appiumScript)) {
+        Write-Log "Appium not found at $appiumScript. Installing Appium first..." "WARN"
         Install-Appium
     }
     
     $env:APPIUM_HOME = $appiumHome
     
-    # Detect Appium version
-    $appiumScript = "$appiumHome\node_modules\appium\build\lib\main.js"
+    # Get Node.js path
     $nodePath = "$InstallFolder\nodejs"
     if ($Script:ActiveNodePath) { $nodePath = $Script:ActiveNodePath }
     
@@ -898,17 +983,16 @@ function Install-XCUITestDriver {
     Write-Log "================================================================" "INF"
     
     $appiumHome = "$InstallFolder\appium-home"
-    $appiumExe = "$appiumHome\node_modules\.bin\appium.cmd"
+    $appiumScript = "$appiumHome\node_modules\appium\build\lib\main.js"
     
-    if (-not (Test-Path $appiumExe)) {
-        Write-Log "Appium not found. Installing Appium first..." "WARN"
+    if (-not (Test-Path $appiumScript)) {
+        Write-Log "Appium not found at $appiumScript. Installing Appium first..." "WARN"
         Install-Appium
     }
     
     $env:APPIUM_HOME = $appiumHome
     
-    # Detect Appium version
-    $appiumScript = "$appiumHome\node_modules\appium\build\lib\main.js"
+    # Get Node.js path
     $nodePath = "$InstallFolder\nodejs"
     if ($Script:ActiveNodePath) { $nodePath = $Script:ActiveNodePath }
     
@@ -1118,10 +1202,10 @@ function Install-DeviceFarm {
     Write-Log "================================================================" "INF"
     
     $appiumHome = "$InstallFolder\appium-home"
-    $appiumExe = "$appiumHome\node_modules\.bin\appium.cmd"
+    $appiumScript = "$appiumHome\node_modules\appium\build\lib\main.js"
     
-    if (-not (Test-Path $appiumExe)) {
-        Write-Log "Appium not found. Installing Appium first..." "WARN"
+    if (-not (Test-Path $appiumScript)) {
+        Write-Log "Appium not found at $appiumScript. Installing Appium first..." "WARN"
         Install-Appium
     }
     
@@ -1452,7 +1536,7 @@ function Verify-Installations {
     
     $appiumHome = "$InstallFolder\appium-home"
     $nodePath = "$InstallFolder\nodejs"
-    $appiumExe = "$appiumHome\node_modules\.bin\appium.cmd"
+    $appiumScript = "$appiumHome\node_modules\appium\build\lib\main.js"
     
     Write-Log "Environment variables:"
     Write-Log "- APPIUM_HOME: $appiumHome"

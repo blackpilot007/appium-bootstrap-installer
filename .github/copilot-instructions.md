@@ -69,10 +69,12 @@ catch {
 $errorMsg = $_.Exception.Message
 Write-Log "Error: $errorMsg" "ERR"
 
-# Initialize environment for nvm-windows
+# Initialize environment for nvm-windows (no-admin approach)
 $env:NVM_HOME = $nvmPath
-$env:NVM_SYMLINK = $nodejsPath
-$env:Path = "$nvmPath;$nodejsPath;$env:Path"
+$env:Path = "$nodejsPath;$nvmPath;$env:Path"
+
+# Copy Node.js instead of using 'nvm use' (avoids admin-required symlinks)
+Copy-Item -Path "$nvmPath\v$NodeVersion.*" -Destination $nodejsPath -Recurse -Force
 ```
 
 ### Bash Script Standards
@@ -101,10 +103,10 @@ export NVM_DIR="$INSTALL_FOLDER/.nvm"
 - **portRanges**: Dynamic port allocation for sessions
 
 ### Environment Variables
-- **APPIUM_HOME**: Points to installation folder
+- **APPIUM_HOME**: Points to appium-home directory for drivers/plugins
 - **NVM_HOME**: (Windows) nvm installation directory
-- **NVM_SYMLINK**: (Windows) nodejs symlink/junction directory
 - **NVM_DIR**: (macOS/Linux) nvm installation directory
+- **Path**: Must include nodejs directory (copied files, not symlink)
 
 ## Common Tasks
 
@@ -127,6 +129,14 @@ export NVM_DIR="$INSTALL_FOLDER/.nvm"
 - Check `adb devices` and `idevice_id -l` work standalone
 - Review `DeviceListenerService.cs` for regex patterns
 - Verify port allocation in `AppiumSessionManager.AllocateConsecutivePortsAsync`
+
+### Appium Binary Detection
+When using `--no-bin-links` npm flag (required for no-admin installation):
+- **Primary Path**: `$appiumHome\node_modules\appium\build\lib\main.js`
+- **Fallback Path**: `$appiumHome\node_modules\.bin\appium.cmd` (only if bin-links enabled)
+- **Execution Pattern**: `& "$nodePath\node.exe" "$appiumScript" --version`
+- **Why**: npm `--no-bin-links` prevents creation of `.bin` directory and wrapper scripts
+- **All Functions Must Use**: Check `main.js` first, then fallback to `.bin\appium.cmd`
 
 ### Cross-Platform Testing
 - **Windows**: Test with PowerShell 5.1 (not Core)
@@ -192,6 +202,25 @@ Set-Content -Path "$nvmPath\settings.txt" -Value $settingsContent -Encoding ASCI
 $env:NVM_HOME = $nvmPath
 ```
 
+**Problem**: "nvm use" prompts for UAC/admin access
+```powershell
+# Solution: Copy Node.js files instead of using symlinks (no admin required)
+$sourceDir = Get-ChildItem -Path $nvmPath -Directory | Where-Object { $_.Name -match "^v$NodeVersion\." } | Select-Object -First 1
+if (Test-Path $nodejsPath) { Remove-ItemWithRetries -Path $nodejsPath -Recurse -Force }
+Copy-Item -Path $sourceDir.FullName -Destination $nodejsPath -Recurse -Force
+# This avoids symlink/junction creation which requires admin privileges on Windows
+```
+
+**Problem**: "Appium binary not found after installation"
+```powershell
+# Solution: When using --no-bin-links, check main.js instead of appium.cmd
+$appiumScript = "$appiumHome\node_modules\appium\build\lib\main.js"
+if (Test-Path $appiumScript) {
+    $appiumVersion = & "$nodePath\node.exe" $appiumScript --version
+}
+# The .bin directory is not created when using --no-bin-links flag
+```
+
 ### macOS/Linux nvm Issues
 **Problem**: "nvm: command not found"
 ```bash
@@ -199,6 +228,22 @@ $env:NVM_HOME = $nvmPath
 export NVM_DIR="$INSTALL_FOLDER/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 nvm use $NODE_VERSION
+```
+
+### NPM Configuration Issues
+**Problem**: "The 'global-style' option is deprecated"
+```powershell
+# Solution: Remove deprecated global-style config (npm 10+)
+& $npmPath config set prefix "$appiumHome" --location user
+& $npmPath config set bin-links false --location user
+# Do NOT set global-style - it's deprecated in favor of --install-strategy
+```
+
+**Problem**: npm trying to create symlinks requiring admin access
+```powershell
+# Solution: Use --no-bin-links flag for all npm install operations
+npm install appium@$version --prefix $appiumHome --no-bin-links --legacy-peer-deps
+# This prevents symlink creation in .bin directory
 ```
 
 ### Port Allocation Failures
@@ -249,12 +294,18 @@ test: Add device listener integration tests
 ### Do NOT
 - ❌ Use system services (NSSM/Servy/Systemd) in default flow
 - ❌ Require administrator/sudo privileges
+- ❌ Use `nvm use` on Windows (creates admin-requiring symlinks)
+- ❌ Use deprecated npm configs like `global-style`
+- ❌ Expect `.bin` directory when using `--no-bin-links`
 - ❌ Install globally unless explicitly configured
 - ❌ Hardcode paths or platform-specific logic in C#
 - ❌ Use deprecated APIs without migration plan
 
 ### DO
 - ✅ Support portable, non-admin installation
+- ✅ Copy Node.js files instead of creating symlinks (Windows)
+- ✅ Use `--no-bin-links` flag for npm install operations
+- ✅ Check for `main.js` when locating Appium binary
 - ✅ Use child processes for Appium servers
 - ✅ Implement proper cleanup and disposal
 - ✅ Log structured data for debugging
@@ -262,6 +313,7 @@ test: Add device listener integration tests
 - ✅ Handle transient failures with retry logic
 - ✅ Document configuration options
 - ✅ Use `nvm-windows` (portable) on Windows, `nvm` on Unix
+- ✅ Provide detailed diagnostic output when installations fail
 
 ## Questions?
 Refer to existing code patterns in:

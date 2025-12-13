@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using AppiumBootstrapInstaller.Models;
 using Microsoft.Extensions.Logging;
@@ -190,6 +191,12 @@ namespace AppiumBootstrapInstaller.Services
                 string? value = Environment.GetEnvironmentVariable(varName);
                 return value ?? match.Value;
             });
+
+            // Normalize path separators for current platform
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                result = result.Replace('/', '\\');
+            }
 
             return result;
         }
