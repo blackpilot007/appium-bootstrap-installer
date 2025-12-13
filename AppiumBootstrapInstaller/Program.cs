@@ -22,6 +22,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Serilog;
 using Serilog.Events;
+using Serilog.Sinks.SystemConsole.Themes;
 
 namespace AppiumBootstrapInstaller
 {
@@ -29,12 +30,13 @@ namespace AppiumBootstrapInstaller
     {
         static async Task<int> Main(string[] args)
         {
-            // Configure Serilog with plain console output (no colors for better readability)
+            // Configure Serilog with adaptive ANSI color theme that works with both dark and light terminals
             Log.Logger = new LoggerConfiguration()
                 .MinimumLevel.Debug()
                 .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
                 .Enrich.FromLogContext()
                 .WriteTo.Console(
+                    theme: AnsiConsoleTheme.Literate,
                     outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
                 .WriteTo.File("logs/installer-.log", rollingInterval: RollingInterval.Day)
                 .CreateLogger();
