@@ -84,23 +84,64 @@ namespace AppiumBootstrapInstaller.Services
         {
             if (!_config.Enabled) return;
 
+            const int maxRetries = 3;
+            const int baseDelayMs = 500;
+
             await _saveLock.WaitAsync();
             try
             {
-                var data = new DeviceRegistryData
+                for (int attempt = 1; attempt <= maxRetries; attempt++)
                 {
-                    LastUpdated = DateTime.UtcNow,
-                    Devices = _devices.Values.ToList()
-                };
-                
-                var json = JsonSerializer.Serialize(data, AppJsonSerializerContext.Default.DeviceRegistryData);
+                    try
+                    {
+                        var data = new DeviceRegistryData
+                        {
+                            LastUpdated = DateTime.UtcNow,
+                            Devices = _devices.Values.ToList()
+                        };
+                        
+                        var json = JsonSerializer.Serialize(data, AppJsonSerializerContext.Default.DeviceRegistryData);
 
-                await File.WriteAllTextAsync(_config.FilePath, json);
-                _logger.LogDebug("Device registry saved to {FilePath}", _config.FilePath);
+                        // Ensure directory exists
+                        var directory = Path.GetDirectoryName(_config.FilePath);
+                        if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+                        {
+                            Directory.CreateDirectory(directory);
+                        }
+
+                        // Write to temp file first, then atomic rename
+                        var tempFile = $"{_config.FilePath}.tmp";
+                        await File.WriteAllTextAsync(tempFile, json);
+                        
+                        // Atomic move
+                        if (File.Exists(_config.FilePath))
+                        {
+                            File.Delete(_config.FilePath);
+                        }
+                        File.Move(tempFile, _config.FilePath);
+                        
+                        _logger.LogDebug("Device registry saved to {FilePath}", _config.FilePath);
+                        return;
+                    }
+                    catch (IOException ex) when (attempt < maxRetries)
+                    {
+                        _logger.LogWarning(ex,
+                            "I/O error saving device registry, attempt {Attempt}/{MaxRetries}",
+                            attempt, maxRetries);
+                        await Task.Delay(baseDelayMs * attempt);
+                    }
+                    catch (UnauthorizedAccessException ex)
+                    {
+                        _logger.LogError(ex, "Permission denied saving device registry to {FilePath}", _config.FilePath);
+                        return;
+                    }
+                }
+                
+                _logger.LogError("Failed to save device registry after {MaxRetries} attempts", maxRetries);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to save device registry");
+                _logger.LogError(ex, "Unexpected error saving device registry");
             }
             finally
             {

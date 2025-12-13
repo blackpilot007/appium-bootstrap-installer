@@ -148,6 +148,9 @@ namespace AppiumBootstrapInstaller.Models
 
         [JsonPropertyName("nvmVersion")]
         public string? NvmVersion { get; set; }
+
+        [JsonPropertyName("goIosVersion")]
+        public string? GoIosVersion { get; set; } = "v1.0.189";
     }
 
     /// <summary>
@@ -163,6 +166,9 @@ namespace AppiumBootstrapInstaller.Models
 
         [JsonPropertyName("nvmVersion")]
         public string? NvmVersion { get; set; }
+
+        [JsonPropertyName("goIosVersion")]
+        public string? GoIosVersion { get; set; } = "v1.0.189";
     }
 
     /// <summary>
@@ -178,5 +184,8 @@ namespace AppiumBootstrapInstaller.Models
 
         [JsonPropertyName("nvmVersion")]
         public string? NvmVersion { get; set; }
+
+        [JsonPropertyName("goIosVersion")]
+        public string? GoIosVersion { get; set; } = "v1.0.189";
     }
 }

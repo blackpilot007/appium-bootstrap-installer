@@ -34,6 +34,8 @@ namespace AppiumBootstrapInstaller.Services
         private readonly AppiumSessionManager _sessionManager;
         private readonly DeviceMetrics _metrics;
         private Timer? _metricsTimer;
+        private string? _goIosPath;
+        private bool _useGoIosForDevices = false;
 
         public DeviceListenerService(
             ILogger<DeviceListenerService> logger,
@@ -49,6 +51,14 @@ namespace AppiumBootstrapInstaller.Services
             _registry = registry;
             _sessionManager = sessionManager;
             _metrics = metrics;
+            
+            // Check for go-ios installation
+            var goIosBin = Path.Combine(_installFolder, ".cache", "appium-device-farm", "goIOS", "ios", "ios.exe");
+            if (File.Exists(goIosBin))
+            {
+                _goIosPath = goIosBin;
+                _logger.LogInformation("Found go-ios at: {Path}", _goIosPath);
+            }
             
             // Log metrics every 5 minutes
             _metricsTimer = new Timer(
@@ -74,9 +84,17 @@ namespace AppiumBootstrapInstaller.Services
             // Check tool availability
             var adbAvailable = IsToolAvailable("adb");
             var ideviceAvailable = IsToolAvailable("idevice_id");
+            
+            // If libimobiledevice not available, check for go-ios fallback
+            if (!ideviceAvailable && !string.IsNullOrEmpty(_goIosPath))
+            {
+                _logger.LogInformation("libimobiledevice not available, using go-ios as fallback");
+                _useGoIosForDevices = true;
+                ideviceAvailable = true;
+            }
 
             _logger.LogInformation("ADB available: {Available}", adbAvailable);
-            _logger.LogInformation("idevice_id available: {Available}", ideviceAvailable);
+            _logger.LogInformation("iOS tools available: {Available} (using {Tool})", ideviceAvailable, _useGoIosForDevices ? "go-ios" : "libimobiledevice");
 
             if (!adbAvailable && !ideviceAvailable)
             {
@@ -232,25 +250,132 @@ namespace AppiumBootstrapInstaller.Services
 
             try
             {
-                var output = await RunCommandAsync("idevice_id", "-l");
-                var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-
-                foreach (var line in lines)
+                if (_useGoIosForDevices && !string.IsNullOrEmpty(_goIosPath))
                 {
-                    var udid = line.Trim();
-                    if (!string.IsNullOrWhiteSpace(udid))
+                    // Use go-ios with graceful error handling for pairing issues
+                    try
                     {
-                        var name = await GetiOSDeviceNameAsync(udid);
-                        devices.Add(new Device
+                        var psi = new ProcessStartInfo
                         {
-                            Id = udid,
-                            Platform = DevicePlatform.iOS,
-                            Type = DeviceType.Physical,
-                            Name = name,
-                            State = DeviceState.Connected,
-                            ConnectedAt = DateTime.UtcNow,
-                            LastSeen = DateTime.UtcNow
-                        });
+                            FileName = _goIosPath,
+                            Arguments = "list --details",
+                            RedirectStandardOutput = true,
+                            RedirectStandardError = true,
+                            UseShellExecute = false,
+                            CreateNoWindow = true
+                        };
+
+                        using var process = Process.Start(psi);
+                        if (process == null) return devices;
+
+                        var output = await process.StandardOutput.ReadToEndAsync();
+                        var stderr = await process.StandardError.ReadToEndAsync();
+                        await process.WaitForExitAsync();
+
+                    // go-ios returns non-zero exit code when no devices found or pairing issues
+                    // This is expected behavior for monitoring, not a fatal error
+                    if (process.ExitCode != 0)
+                    {
+                        // Check for device trust/pairing issues
+                        if (stderr.Contains("could not retrieve PairRecord") || stderr.Contains("ReadPair failed"))
+                        {
+                            _logger.LogWarning("═══════════════════════════════════════════════════════════════");
+                            _logger.LogWarning("  iOS DEVICE DETECTED BUT NOT TRUSTED");
+                            _logger.LogWarning("═══════════════════════════════════════════════════════════════");
+                            _logger.LogWarning("Action Required:");
+                            _logger.LogWarning("  1. Unlock your iPhone/iPad");
+                            _logger.LogWarning("  2. Look for 'Trust This Computer?' dialog on device");
+                            _logger.LogWarning("  3. Tap 'Trust' and enter device passcode");
+                            _logger.LogWarning("  4. Device will appear automatically once trusted");
+                            _logger.LogWarning("═══════════════════════════════════════════════════════════════");
+                        }
+                        // Only log unexpected errors (not pairing or "no devices")
+                        else if (!stderr.Contains("no device found") && !stderr.Contains("go-ios agent is not running"))
+                        {
+                            _logger.LogDebug("go-ios list returned exit code {ExitCode}: {Error}", 
+                                process.ExitCode, stderr);
+                        }
+                        return devices; // Empty list - no devices paired or connected
+                    }
+
+                    // go-ios returns JSON format: {"deviceList":[{"Udid":"...","ProductName":"...","ProductVersion":"...","DeviceName":"..."}]}
+                    var jsonOutput = output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                        .FirstOrDefault(line => line.TrimStart().StartsWith("{"));
+                    
+                    if (!string.IsNullOrEmpty(jsonOutput))
+                    {
+                        try
+                        {
+                            using var jsonDoc = System.Text.Json.JsonDocument.Parse(jsonOutput);
+                            if (jsonDoc.RootElement.TryGetProperty("deviceList", out var deviceList))
+                            {
+                                foreach (var deviceElement in deviceList.EnumerateArray())
+                                {
+                                    var udid = deviceElement.TryGetProperty("Udid", out var udidProp) ? udidProp.GetString() : null;
+                                    var deviceName = deviceElement.TryGetProperty("DeviceName", out var nameProp) ? nameProp.GetString() : null;
+                                    var productName = deviceElement.TryGetProperty("ProductName", out var prodProp) ? prodProp.GetString() : null;
+                                    var productVersion = deviceElement.TryGetProperty("ProductVersion", out var verProp) ? verProp.GetString() : null;
+                                    
+                                    if (!string.IsNullOrEmpty(udid))
+                                    {
+                                        var displayName = !string.IsNullOrEmpty(deviceName) ? deviceName : 
+                                                         (!string.IsNullOrEmpty(productName) ? productName : "Unknown iOS Device");
+                                        
+                                        devices.Add(new Device
+                                        {
+                                            Id = udid,
+                                            Platform = DevicePlatform.iOS,
+                                            Type = DeviceType.Physical,
+                                            Name = displayName,
+                                            State = DeviceState.Connected,
+                                            ConnectedAt = DateTime.UtcNow,
+                                            LastSeen = DateTime.UtcNow
+                                        });
+                                        
+                                        // Log all device details
+                                        _logger.LogInformation(
+                                            "iOS Device Detected: {DeviceName} | UDID: {Udid} | Model: {ProductName} | iOS: {ProductVersion}",
+                                            displayName, udid, productName ?? "N/A", productVersion ?? "N/A"
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        catch (System.Text.Json.JsonException ex)
+                        {
+                            _logger.LogDebug(ex, "Failed to parse go-ios JSON output: {Output}", jsonOutput);
+                        }
+                    }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "go-ios command execution failed, treating as no devices");
+                        return devices; // Return empty list on any error
+                    }
+                }
+                else
+                {
+                    // Use libimobiledevice
+                    var output = await RunCommandAsync("idevice_id", "-l");
+                    var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+                    foreach (var line in lines)
+                    {
+                        var udid = line.Trim();
+                        if (!string.IsNullOrWhiteSpace(udid))
+                        {
+                            var name = await GetiOSDeviceNameAsync(udid);
+                            devices.Add(new Device
+                            {
+                                Id = udid,
+                                Platform = DevicePlatform.iOS,
+                                Type = DeviceType.Physical,
+                                Name = name,
+                                State = DeviceState.Connected,
+                                ConnectedAt = DateTime.UtcNow,
+                                LastSeen = DateTime.UtcNow
+                            });
+                        }
                     }
                 }
             }
@@ -279,8 +404,37 @@ namespace AppiumBootstrapInstaller.Services
         {
             try
             {
-                var output = await RunCommandAsync("ideviceinfo", $"-u {udid} -k DeviceName");
-                return output.Trim();
+                if (_useGoIosForDevices && !string.IsNullOrEmpty(_goIosPath))
+                {
+                    // Use go-ios devicename command with error handling
+                    var psi = new ProcessStartInfo
+                    {
+                        FileName = _goIosPath,
+                        Arguments = $"devicename --udid={udid}",
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+
+                    using var process = Process.Start(psi);
+                    if (process == null) return "Unknown iOS Device";
+
+                    var output = await process.StandardOutput.ReadToEndAsync();
+                    await process.WaitForExitAsync();
+
+                    if (process.ExitCode == 0 && !string.IsNullOrWhiteSpace(output))
+                    {
+                        return output.Trim();
+                    }
+                    return "Unknown iOS Device";
+                }
+                else
+                {
+                    // Use libimobiledevice
+                    var output = await RunCommandAsync("ideviceinfo", $"-u {udid} -k DeviceName");
+                    return output.Trim();
+                }
             }
             catch
             {
@@ -320,9 +474,20 @@ namespace AppiumBootstrapInstaller.Services
                             device.AppiumSession = session;
                             _registry.AddOrUpdateDevice(device);
 
+                            // Log service log paths for easy troubleshooting
+                            var executableDir = AppDomain.CurrentDomain.BaseDirectory;
+                            var logDir = Path.Combine(executableDir, "logs");
+                            var serviceName = $"Appium-{device.Id}";
+                            var stdoutLog = Path.Combine(logDir, $"{serviceName}_stdout.log");
+                            var stderrLog = Path.Combine(logDir, $"{serviceName}_stderr.log");
+
                             _logger.LogInformation(
                                 "[{CorrelationId}] Appium session started for {DeviceId} on port {Port} (took {Duration}ms)",
                                 correlationId, device.Id, session.AppiumPort, duration.TotalMilliseconds
+                            );
+                            _logger.LogInformation(
+                                "[{CorrelationId}] Service logs: {StdoutLog} | {StderrLog}",
+                                correlationId, stdoutLog, stderrLog
                             );
                         }
                         else
@@ -414,9 +579,11 @@ namespace AppiumBootstrapInstaller.Services
                     CreateNoWindow = true
                 };
 
-                var process = Process.Start(psi);
-                process?.WaitForExit();
-                return process?.ExitCode == 0;
+                using var process = Process.Start(psi);
+                if (process == null) return false;
+                
+                process.WaitForExit();
+                return process.ExitCode == 0;
             }
             catch
             {

@@ -1,5 +1,5 @@
 # ServiceSetup.ps1
-# Sets up NSSM (Non-Sucking Service Manager) for managing Appium services on Windows
+# Sets up Servy for managing Appium services on Windows
 # Equivalent to SupervisorSetup.sh for macOS
 
 param(
@@ -37,7 +37,7 @@ function Write-ErrorMessage {
     Write-Log "================================================================" "ERR"
 }
 
-# Note: NSSM service installation typically requires admin privileges
+# Note: Servy service installation typically requires admin privileges
 # However, for user-directory installations, we can skip service setup
 # Users can manually set up services if needed with admin privileges later
 
@@ -49,78 +49,103 @@ Write-Log "User: $env:USERNAME"
 # Create directories
 $serviceDir = "$InstallDir\services"
 $activeDir = "$serviceDir\Active"
-$logsDir = "$serviceDir\logs"
-$nssmDir = "$InstallDir\nssm"
+# Note: We do NOT create logs dir here - it's managed by the executable in its own directory
+$servyDir = "$InstallDir\servy"
 
-foreach ($dir in @($InstallDir, $serviceDir, $activeDir, $logsDir, $nssmDir)) {
+foreach ($dir in @($InstallDir, $serviceDir, $activeDir, $servyDir)) {
     if (-not (Test-Path $dir)) {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
         Write-Log "Created directory: $dir"
     }
 }
 
-# Install NSSM
-function Install-NSSM {
+# Install Servy
+function Install-Servy {
     Write-Log "================================================================" "INF"
-    Write-Log "               STARTING NSSM INSTALLATION                       " "INF"
+    Write-Log "               STARTING SERVY INSTALLATION                       " "INF"
     Write-Log "================================================================" "INF"
     
-    $nssmExe = "$nssmDir\nssm.exe"
+    # Check if running as administrator
+    $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+    $isAdmin = $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     
-    if (Test-Path $nssmExe) {
-        Write-Log "NSSM is already installed at $nssmDir"
-        # Skip version check to avoid potential popups
-        # $nssmVersion = & $nssmExe version
-        # Write-Log "NSSM version: $nssmVersion"
-        Write-Success "NSSM ALREADY INSTALLED"
+    if (-not $isAdmin) {
+        Write-Log "Running in non-admin mode. Skipping Servy installation." "WARN"
+        Write-Log "Windows services require administrator privileges." "WARN"
+        Write-Log "Run installer as Administrator to enable service management." "WARN"
         return
     }
     
-    Write-Log "Downloading NSSM (Non-Sucking Service Manager)..."
+    # Check if Servy is already installed globally
+    $globalServyPath = "C:\Program Files\Servy\servy-cli.exe"
+    if (Test-Path $globalServyPath) {
+        Write-Log "Servy is already installed at $globalServyPath"
+        Write-Success "SERVY ALREADY INSTALLED (GLOBAL)"
+        return
+    }
+    
+    $servyExe = "$servyDir\servy-cli.exe"
+    
+    if (Test-Path $servyExe) {
+        Write-Log "Servy is already installed at $servyDir"
+        Write-Success "SERVY ALREADY INSTALLED (LOCAL)"
+        return
+    }
+    
+    Write-Log "Installing Servy using Chocolatey..."
+    Write-Log "Note: Servy provides health monitoring, log rotation, and no GUI prompts"
     
     try {
-        # Download NSSM
-        $nssmVersion = "2.24"
-        $nssmUrl = "https://nssm.cc/release/nssm-$nssmVersion.zip"
-        $nssmZip = "$env:TEMP\nssm.zip"
+        # Try to install Servy via Chocolatey
+        $chocoPath = "$InstallDir\chocolatey\bin\choco.exe"
+        if (Test-Path $chocoPath) {
+            Write-Log "Installing Servy via Chocolatey..."
+            & $chocoPath install servy -y --no-progress --force 2>&1 | ForEach-Object { Write-Log $_ }
+            
+            # Check if installed globally
+            if (Test-Path $globalServyPath) {
+                Write-Log "Servy installed successfully at $globalServyPath"
+                Write-Success "SERVY INSTALLATION"
+                return
+            }
+        }
         
-        Write-Log "Downloading from $nssmUrl..."
-        Invoke-WebRequest -Uri $nssmUrl -OutFile $nssmZip -UseBasicParsing
+        # Fallback: Download portable version
+        Write-Log "Downloading Servy portable version..."
+        $servyRelease = "https://api.github.com/repos/aelassas/servy/releases/latest"
         
-        # Extract NSSM
-        Write-Log "Extracting NSSM..."
-        $extractPath = "$env:TEMP\nssm-extract"
-        Expand-Archive -Path $nssmZip -DestinationPath $extractPath -Force
+        $release = Invoke-RestMethod -Uri $servyRelease -UseBasicParsing
+        $asset = $release.assets | Where-Object { $_.name -like "*servy-cli*.zip" } | Select-Object -First 1
         
-        # Determine architecture
-        $arch = if ([Environment]::Is64BitOperatingSystem) { "win64" } else { "win32" }
-        $nssmSourcePath = "$extractPath\nssm-$nssmVersion\$arch\nssm.exe"
-        
-        if (Test-Path $nssmSourcePath) {
-            Copy-Item -Path $nssmSourcePath -Destination $nssmExe -Force
-            Write-Log "NSSM installed successfully at $nssmExe"
+        if ($asset) {
+            $servyZip = "$env:TEMP\servy-cli.zip"
+            Write-Log "Downloading from $($asset.browser_download_url)..."
+            Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $servyZip -UseBasicParsing
+            
+            # Extract Servy
+            Write-Log "Extracting Servy..."
+            Expand-Archive -Path $servyZip -DestinationPath $servyDir -Force
+            
+            if (Test-Path $servyExe) {
+                Write-Log "Servy installed successfully at $servyExe"
+            }
+            else {
+                throw "Servy executable not found after extraction"
+            }
+            
+            # Clean up
+            Remove-Item -Path $servyZip -Force -ErrorAction SilentlyContinue
+            
+            Write-Success "SERVY INSTALLATION"
         }
         else {
-            throw "NSSM executable not found in extracted archive"
+            throw "Could not find Servy CLI download"
         }
-        
-        # Add to system PATH
-        # Add to current session PATH only (Isolated/Portable mode)
-        if ($env:Path -notlike "*$nssmDir*") {
-            $env:Path += ";$nssmDir"
-            Write-Log "Added NSSM directory to current session PATH"
-        }
-        
-        # Clean up
-        Remove-Item -Path $nssmZip -Force -ErrorAction SilentlyContinue
-        Remove-Item -Path $extractPath -Recurse -Force -ErrorAction SilentlyContinue
-        
-        Write-Success "NSSM INSTALLATION"
     }
     catch {
-        Write-ErrorMessage "NSSM INSTALLATION"
-        Write-Log "Error: $_" "ERR"
-        throw
+        Write-Log "WARN: Servy installation failed: $_" "WARN"
+        Write-Log "WARN: Services will use direct process execution instead" "WARN"
+        Write-Log "WARN: For best results, install Servy manually from: https://github.com/aelassas/servy" "WARN"
     }
 }
 
@@ -148,19 +173,41 @@ function Setup-DeviceListenerService {
     Write-Log "         SETTING UP DEVICE LISTENER SERVICE                      " "INF"
     Write-Log "================================================================" "INF"
     
+    # Check if running as administrator
+    $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+    $isAdmin = $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    
+    if (-not $isAdmin) {
+        Write-Log "================================================================" "WARN"
+        Write-Log "    WINDOWS SERVICES REQUIRE ADMINISTRATOR PRIVILEGES           " "WARN"
+        Write-Log "================================================================" "WARN"
+        Write-Log "The device listener service cannot be installed without admin rights." "WARN"
+        Write-Log "Two options:" "WARN"
+        Write-Log "  1. Run this installer as Administrator (right-click -> Run as Administrator)" "WARN"
+        Write-Log "  2. Continue without service - you can manually start device monitoring later" "WARN"
+        Write-Log "" "WARN"
+        Write-Log "Skipping service installation (non-admin mode)" "WARN"
+        Write-Log "================================================================" "WARN"
+        return
+    }
+    
     $serviceName = "AppiumBootstrap_DeviceListener"
     $deviceListenerScript = "$InstallDir\Platform\Windows\Scripts\DeviceListener.ps1"
-    $nssmExe = "$nssmDir\nssm.exe"
+    
+    # Find Servy CLI
+    $servyCli = "C:\Program Files\Servy\servy-cli.exe"
+    if (-not (Test-Path $servyCli)) {
+        $servyCli = "$servyDir\servy-cli.exe"
+        if (-not (Test-Path $servyCli)) {
+            Write-Log "Servy CLI not found. Skipping service setup." "WARN"
+            Write-Log "Services will be managed by the installer executable directly" "WARN"
+            return
+        }
+    }
     
     if (-not (Test-Path $deviceListenerScript)) {
         Write-Log "Device listener script not found at $deviceListenerScript" "WARN"
         Write-Log "Skipping device listener service setup" "WARN"
-        return
-    }
-    
-    if (-not (Test-Path $nssmExe)) {
-        Write-Log "NSSM not found at $nssmExe" "ERR"
-        Write-Log "Cannot setup device listener service" "ERR"
         return
     }
     
@@ -169,11 +216,9 @@ function Setup-DeviceListenerService {
     if ($existingService) {
         Write-Log "Service $serviceName already exists. Removing..." "WARN"
         try {
-            if ($existingService.Status -eq "Running") {
-                & $nssmExe stop $serviceName
-                Start-Sleep -Seconds 2
-            }
-            & $nssmExe remove $serviceName confirm
+            & $servyCli stop --quiet --name="$serviceName" 2>&1 | Out-Null
+            Start-Sleep -Seconds 2
+            & $servyCli uninstall --quiet --name="$serviceName" 2>&1 | Out-Null
             Write-Log "Removed existing service"
         }
         catch {
@@ -182,108 +227,112 @@ function Setup-DeviceListenerService {
     }
     
     try {
-        # Install service
-        Write-Log "Installing device listener service..."
-        
-        $powershellExe = "powershell.exe"
-        $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$deviceListenerScript`" -InstallDir `"$InstallDir`" -PollIntervalSeconds 5"
-        
-        # Install the service
-        & $nssmExe install $serviceName $powershellExe $arguments
-        
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to install service. NSSM exit code: $LASTEXITCODE"
+        # Configure service for logging to executable's logs folder (same as Serilog installer logs)
+        $executablePath = Get-Process -Id $PID | Select-Object -ExpandProperty Path
+        $executableDir = Split-Path -Parent $executablePath
+        $logsDir = Join-Path $executableDir "logs"
+        if (-not (Test-Path $logsDir)) {
+            New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
         }
         
-        Write-Log "Service installed successfully"
+        # Install service with Servy (includes health monitoring and log rotation)
+        Write-Log "Installing device listener service with Servy..."
+        Write-Log "Features: Health monitoring, automatic restart, log rotation"
         
-        # Configure service
-        Write-Log "Configuring service parameters..."
+        $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$deviceListenerScript`" -InstallDir `"$InstallDir`" -PollIntervalSeconds 5"
         
-        # Set display name
-        & $nssmExe set $serviceName DisplayName "Appium Bootstrap Device Listener"
+        & $servyCli install --quiet `
+            --name="$serviceName" `
+            --displayName="Appium Bootstrap Device Listener" `
+            --description="Monitors Android and iOS device connections for Appium testing" `
+            --path="powershell.exe" `
+            --startupDir="$InstallDir" `
+            --params="$arguments" `
+            --startupType=Automatic `
+            --priority=Normal `
+            --stdout="$logsDir\DeviceListener_stdout.log" `
+            --stderr="$logsDir\DeviceListener_stderr.log" `
+            --enableSizeRotation `
+            --rotationSize=10 `
+            --maxRotations=5 `
+            --enableHealth `
+            --heartbeatInterval=60 `
+            --maxFailedChecks=3 `
+            --recoveryAction=RestartProcess `
+            --maxRestartAttempts=5
         
-        # Set description
-        & $nssmExe set $serviceName Description "Monitors Android and iOS device connections for Appium testing"
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to install service. Servy CLI exit code: $LASTEXITCODE"
+        }
         
-        # Set startup type to automatic
-        & $nssmExe set $serviceName Start SERVICE_AUTO_START
-        
-        # Set working directory
-        & $nssmExe set $serviceName AppDirectory "$InstallDir"
-        
-        # Set log output
-        $logDir = "$InstallDir\services\logs"
-        & $nssmExe set $serviceName AppStdout "$logDir\DeviceListener_stdout.log"
-        & $nssmExe set $serviceName AppStderr "$logDir\DeviceListener_stderr.log"
-        
-        # Set restart behavior (restart on failure)
-        & $nssmExe set $serviceName AppExit Default Restart
-        & $nssmExe set $serviceName AppRestartDelay 5000
-        
-        Write-Log "Service configuration completed"
+        Write-Log "Service installed successfully with health monitoring"
         
         # Start the service
         Write-Log "Starting device listener service..."
-        & $nssmExe start $serviceName
+        & $servyCli start --quiet --name="$serviceName"
         
         if ($LASTEXITCODE -eq 0) {
             Write-Success "DEVICE LISTENER SERVICE SETUP"
             Write-Log ""
             Write-Log "Service Name: $serviceName"
             Write-Log "Service Status: Running"
+            Write-Log "Health Monitoring: Enabled (checks every 60s)"
+            Write-Log "Auto-Restart: Enabled (max 5 attempts)"
+            Write-Log "Log Rotation: Enabled (10 MB, keep 5 files)"
             Write-Log "Log Files:"
-            Write-Log "  - $logDir\DeviceListener_$(Get-Date -Format 'yyyyMMdd').log"
-            Write-Log "  - $logDir\DeviceListener_stdout.log"
-            Write-Log "  - $logDir\DeviceListener_stderr.log"
+            Write-Log "  - $logsDir\DeviceListener_stdout.log"
+            Write-Log "  - $logsDir\DeviceListener_stderr.log"
             Write-Log ""
             Write-Log "Service Management Commands:"
-            Write-Log "  Start:   nssm start $serviceName"
-            Write-Log "  Stop:    nssm stop $serviceName"
-            Write-Log "  Restart: nssm restart $serviceName"
-            Write-Log "  Status:  nssm status $serviceName"
-            Write-Log "  Remove:  nssm remove $serviceName confirm"
+            Write-Log "  Start:   servy-cli start --name=`"$serviceName`""
+            Write-Log "  Stop:    servy-cli stop --name=`"$serviceName`""
+            Write-Log "  Restart: servy-cli restart --name=`"$serviceName`""
+            Write-Log "  Status:  servy-cli status --name=`"$serviceName`""
+            Write-Log "  Remove:  servy-cli uninstall --name=`"$serviceName`""
         }
         else {
             Write-Log "Warning: Service installed but failed to start (exit code: $LASTEXITCODE)" "WARN"
             Write-Log "You may need administrator privileges to start the service" "WARN"
-            Write-Log "Try manually: nssm start $serviceName" "WARN"
+            Write-Log "Try manually: servy-cli start --name=`"$serviceName`"" "WARN"
         }
     }
     catch {
         Write-ErrorMessage "DEVICE LISTENER SERVICE SETUP"
         Write-Log "Error: $_" "ERR"
         Write-Log "The device listener service could not be set up" "ERR"
-        Write-Log "You can manually set it up later using NSSM" "ERR"
+        Write-Log "You can manually set it up later using Servy CLI" "ERR"
     }
 }
 
-# Verify NSSM setup
-function Test-NSSMSetup {
+# Verify Servy setup
+function Test-ServySetup {
     Write-Log "================================================================" "INF"
-    Write-Log "           VERIFYING NSSM SETUP                                 " "INF"
+    Write-Log "           VERIFYING SERVY SETUP                                 " "INF"
     Write-Log "================================================================" "INF"
     
-    $nssmExe = "$nssmDir\nssm.exe"
+    $servyCli = "C:\Program Files\Servy\servy-cli.exe"
+    if (-not (Test-Path $servyCli)) {
+        $servyCli = "$servyDir\servy-cli.exe"
+    }
     
-    if (Test-Path $nssmExe) {
-        Write-Log "NSSM executable found at $nssmExe"
+    if (Test-Path $servyCli) {
+        Write-Log "Servy CLI found at $servyCli"
         
         try {
-            # Skip version check to avoid potential popups
-            # $version = & $nssmExe version
-            # Write-Log "NSSM version: $version"
-            Write-Log "NSSM is ready to manage Windows services"
-            Write-Success "NSSM SETUP VERIFICATION"
+            $version = & $servyCli version 2>&1 | Select-Object -First 1
+            Write-Log "Servy version: $version"
+            Write-Log "Servy is ready to manage Windows services"
+            Write-Success "SERVY SETUP VERIFICATION"
             return $true
         }
         catch {
-            Write-Log "Error executing NSSM: $_" "ERR"
+            Write-Log "Error executing Servy CLI: $_" "ERR"
             return $false
         }
     }
     else {
-        Write-Log "NSSM executable not found" "ERR"
+        Write-Log "Servy CLI executable not found" "ERR"
+        Write-Log "Service management will be handled by the installer executable" "WARN"
         return $false
     }
 }
@@ -320,32 +369,38 @@ try {
     Write-Log "================================================================" "INF"
     
     Stop-ExistingServices
-    Install-NSSM
+    Install-Servy
     New-PlaceholderConfig
     Setup-DeviceListenerService
     
-    if (Test-NSSMSetup) {
+    if (Test-ServySetup) {
         Write-Log "================================================================" "INF"
         Write-Log "           SERVICE MANAGER SETUP COMPLETED SUCCESSFULLY         " "INF"
         Write-Log "================================================================" "INF"
         Write-Log ""
-        Write-Log "NSSM has been installed and configured successfully."
+        Write-Log "Servy has been installed and configured successfully."
+        Write-Log ""
+        Write-Log "Features enabled:"
+        Write-Log "  - Health monitoring with automatic restart"
+        Write-Log "  - Log rotation (10 MB, keep 5 files)"
+        Write-Log "  - No GUI prompts (fully scriptable)"
         Write-Log ""
         Write-Log "To create a new service, use:"
-        Write-Log "  nssm install ServiceName `"C:\path\to\executable.exe`""
+        Write-Log "  servy-cli install --name=ServiceName --path=`"C:\path\to\executable.exe`""
         Write-Log ""
         Write-Log "To manage services:"
-        Write-Log "  nssm start ServiceName"
-        Write-Log "  nssm stop ServiceName"
-        Write-Log "  nssm restart ServiceName"
-        Write-Log "  nssm remove ServiceName confirm"
+        Write-Log "  servy-cli start --name=ServiceName"
+        Write-Log "  servy-cli stop --name=ServiceName"
+        Write-Log "  servy-cli restart --name=ServiceName"
+        Write-Log "  servy-cli status --name=ServiceName"
+        Write-Log "  servy-cli uninstall --name=ServiceName"
         Write-Log ""
         Write-Log "Service configuration directory: $serviceDir"
-        Write-Log "NSSM executable: $nssmDir\nssm.exe"
         Write-Log "================================================================" "INF"
     }
     else {
-        throw "Service manager setup verification failed"
+        Write-Log "Service manager setup completed (Servy not available)" "WARN"
+        Write-Log "Services will be managed by the installer executable directly" "WARN"
     }
 }
 catch {

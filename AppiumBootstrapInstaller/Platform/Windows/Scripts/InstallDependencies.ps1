@@ -1,20 +1,15 @@
 # InstallDependencies.ps1
-# PowerShell script to install Node.js, NVM, Appium, and drivers on Windows
-# Equivalent to InstallDependencies.sh for macOS
+# PowerShell script to install Node.js, fnm, Appium, drivers and plugins on Windows
 
 param(
     [string]$InstallFolder = "$env:USERPROFILE\.local",
     [string]$NodeVersion = "22",
     [string]$AppiumVersion = "2.17.1",
-    [string]$DriverName = "uiautomator2",
-    [string]$DriverVersion = "",
-    [string]$XCUITestVersion = "",
-    [string]$NvmVersion = "1.1.12",
+    [string]$DriversJson = "[]",
+    [string]$PluginsJson = "[]",
+    [string]$GoIosVersion = "v1.0.189",
     [switch]$InstallIOSSupport,
-    [switch]$InstallAndroidSupport = $true,
-    [switch]$InstallXCUITest = $true,
-    [switch]$InstallUiAutomator = $true,
-    [switch]$InstallDeviceFarm = $true
+    [switch]$InstallAndroidSupport = $true
 )
 
 # Set error action preference
@@ -210,184 +205,138 @@ function Install-Chocolatey {
     }
 }
 
-# Install NVM for Windows
-function Install-NVM {
+# Install fnm (Fast Node Manager) - portable, no GUI, no admin required
+function Install-FNM {
     Write-Log "================================================================" "INF"
-    Write-Log "               STARTING NVM INSTALLATION                        " "INF"
+    Write-Log "               STARTING FNM INSTALLATION                        " "INF"
     Write-Log "================================================================" "INF"
     
-    $nvmPath = "$InstallFolder\nvm"
-    $env:NVM_HOME = $nvmPath
-    $env:NVM_SYMLINK = "$InstallFolder\nodejs"
+    $fnmPath = "$InstallFolder\fnm"
+    $fnmExe = "$fnmPath\fnm.exe"
     $Script:ActiveNodePath = "$InstallFolder\nodejs"
 
-    # Create directories if they don't exist already installed
-    if (Test-Path "$nvmPath\nvm.exe") {
-        Write-Log "NVM is already installed at $nvmPath"
-        & "$nvmPath\nvm.exe" version
-        Write-Success "NVM ALREADY INSTALLED"
+    # Check if fnm is already installed
+    if (Test-Path $fnmExe) {
+        Write-Log "fnm is already installed at $fnmPath"
+        $version = & $fnmExe --version 2>&1 | Out-String
+        Write-Log "fnm version: $version"
+        Write-Success "FNM ALREADY INSTALLED"
         return
     }
     
-    Write-Log "Installing NVM for Windows version $NvmVersion..."
+    Write-Log "Installing fnm (Fast Node Manager) - portable, no GUI, no admin required..."
     
     try {
-        # Download NVM for Windows
-        $nvmInstallerUrl = "https://github.com/coreybutler/nvm-windows/releases/download/$NvmVersion/nvm-noinstall.zip"
-        $nvmZipPath = "$env:TEMP\nvm.zip"
+        # Get latest fnm release from GitHub
+        Write-Log "Fetching latest fnm release from GitHub..."
+        $releaseUrl = "https://api.github.com/repos/Schniz/fnm/releases/latest"
+        $release = Invoke-RestMethod -Uri $releaseUrl -UseBasicParsing
         
-        Write-Log "Downloading NVM from $nvmInstallerUrl..."
-        Invoke-WebRequest -Uri $nvmInstallerUrl -OutFile $nvmZipPath -UseBasicParsing
+        # Find Windows x64 zip asset
+        $asset = $release.assets | Where-Object { $_.name -like "*windows-x64.zip" } | Select-Object -First 1
         
-        # Extract NVM
-        Write-Log "Extracting NVM to $nvmPath..."
-        Expand-Archive -Path $nvmZipPath -DestinationPath $nvmPath -Force
-        
-        # Create settings file
-        $settingsContent = @"
-root: $nvmPath
-path: $($env:NVM_SYMLINK)
-"@
-        Set-Content -Path "$nvmPath\settings.txt" -Value $settingsContent
-        
-        # Add to PATH
-        $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-        if ($userPath -notlike "*$nvmPath*") {
-            [Environment]::SetEnvironmentVariable("Path", "$userPath;$nvmPath;$($env:NVM_SYMLINK)", "User")
+        if (-not $asset) {
+            throw "Could not find Windows x64 zip in latest fnm release"
         }
         
-        # Update current session PATH and env vars
-        $env:NVM_HOME = $nvmPath
-        $env:NVM_SYMLINK = $env:NVM_SYMLINK
-        $env:Path += ";$nvmPath;$($env:NVM_SYMLINK)"
+        $downloadUrl = $asset.browser_download_url
+        $fnmZipPath = "$env:TEMP\fnm.zip"
         
-        Write-Log "NVM installed successfully at $nvmPath"
-        Write-Success "NVM INSTALLATION"
+        Write-Log "Downloading fnm from $downloadUrl..."
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $fnmZipPath -UseBasicParsing
+        
+        # Create fnm directory
+        if (-not (Test-Path $fnmPath)) {
+            New-Item -ItemType Directory -Path $fnmPath -Force | Out-Null
+        }
+        
+        # Extract fnm
+        Write-Log "Extracting fnm to $fnmPath..."
+        Expand-Archive -Path $fnmZipPath -DestinationPath $fnmPath -Force
+        
+        # Verify fnm.exe exists
+        if (-not (Test-Path $fnmExe)) {
+            throw "fnm.exe not found after extraction"
+        }
+        
+        # Set environment variables for current session
+        $env:FNM_DIR = "$fnmPath\node-versions"
+        $env:Path = "$fnmPath;$env:Path"
+        
+        # Clean up
+        if (Test-Path $fnmZipPath) {
+            Remove-Item -Path $fnmZipPath -Force -ErrorAction SilentlyContinue
+        }
+        
+        Write-Log "fnm installed successfully at $fnmPath"
+        Write-Log "No GUI prompts, no admin required, fully portable"
+        Write-Success "FNM INSTALLATION"
     }
     catch {
-        Write-ErrorMessage "NVM INSTALLATION"
+        Write-ErrorMessage "FNM INSTALLATION"
         Write-Log "Error: $_" "ERR"
         throw
     }
 }
 
-# Install Node.js using NVM
+# Install Node.js using fnm
 function Install-NodeJS {
     Write-Log "================================================================" "INF"
     Write-Log "               STARTING NODE.JS INSTALLATION                    " "INF"
     Write-Log "================================================================" "INF"
     
-    $nvmPath = "$InstallFolder\nvm"
-    $nvmExe = "$nvmPath\nvm.exe"
+    $fnmPath = "$InstallFolder\fnm"
+    $fnmExe = "$fnmPath\fnm.exe"
     
-    if (-not (Test-Path $nvmExe)) {
-        Write-Log "NVM not found. Installing NVM first..." "WARN"
-        Install-NVM
+    if (-not (Test-Path $fnmExe)) {
+        Write-Log "fnm not found. Installing fnm first..." "WARN"
+        Install-FNM
     }
     
+    # Set fnm environment for this session
+    $env:FNM_DIR = "$fnmPath\node-versions"
+    $env:Path = "$fnmPath;$env:Path"
+    
     # Check if Node.js version is already installed
-    # Use cmd /c to bypass potential terminal checks in nvm.exe
-    $output = & cmd /c "$nvmExe" list
-    $nodeInstalled = $output | Select-String -Pattern $NodeVersion -Quiet
+    $output = & $fnmExe list 2>&1 | Out-String
+    $nodeInstalled = $output -match "v$NodeVersion"
     
     if ($nodeInstalled) {
         Write-Log "Node.js version $NodeVersion is already installed"
-        & $nvmExe use $NodeVersion
+        & $fnmExe use $NodeVersion
         Write-Success "NODE.JS ALREADY INSTALLED"
         return
     }
     
-    Write-Log "Installing Node.js version $NodeVersion..."
+    Write-Log "Installing Node.js version $NodeVersion using fnm..."
     
     try {
-        # Check if version directory exists first to avoid re-download
-        $existingVer = Get-ChildItem -Path $nvmPath -Directory -Filter "v$NodeVersion*" | Select-Object -First 1
+        # fnm handles download, extraction, and setup automatically (no GUI prompts)
+        Write-Log "Running: fnm install $NodeVersion"
+        $installOutput = & $fnmExe install $NodeVersion 2>&1 | Out-String
+        Write-Log "$installOutput"
         
-        if (-not $existingVer) {
-            # MANUAL DOWNLOAD LOGIC (Primary Strategy to avoid NVM popups)
-            Write-Log "Resolving latest v$NodeVersion version from nodejs.org..."
-            # Note: Using basic parsing for compatibility
-            $releasesJson = Invoke-WebRequest "https://nodejs.org/dist/index.json" -UseBasicParsing
-            $releases = $releasesJson.Content | ConvertFrom-Json
-            $latest = $releases | Where-Object { $_.version -match "^v$NodeVersion\." } | Select-Object -First 1
-             
-            if (-not $latest) { throw "Could not find Node.js version $NodeVersion" }
-             
-            $fullVersion = $latest.version # e.g. v22.12.0
-            $downloadUrl = "https://nodejs.org/dist/$fullVersion/node-$fullVersion-win-x64.zip"
-            $zipPath = "$env:TEMP\node_manual.zip"
-             
-            Write-Log "Downloading Node.js $fullVersion from $downloadUrl..."
-            Invoke-WebRequest -Uri $downloadUrl -OutFile $zipPath -UseBasicParsing
-             
-            # Target directory compatible with NVM standard
-            $destDir = "$nvmPath\$fullVersion"
-            if (Test-Path $destDir) { Remove-Item -Recurse -Force $destDir -ErrorAction SilentlyContinue }
-             
-            Write-Log "Extracting to $destDir..."
-            $extractTmp = "$nvmPath\temp_extract_$((Get-Date).Ticks)"
-            New-Item -ItemType Directory -Path $extractTmp -Force | Out-Null
-             
-            try {
-                Expand-Archive -Path $zipPath -DestinationPath $extractTmp -Force
-                
-                # Move content (Node zip contains a root folder)
-                $subFolder = Get-ChildItem $extractTmp -Directory | Select-Object -First 1
-                if (-not $subFolder) {
-                    throw "No subdirectory found after extracting Node.js archive"
-                }
-                
-                # Ensure destination doesn't exist before moving
-                if (Test-Path $destDir) {
-                    Remove-ItemWithRetries -Path $destDir -Recurse -Force -MaxAttempts 3 -DelayMs 200
-                }
-                
-                Move-Item -Path $subFolder.FullName -Destination $destDir -Force
-                
-                # Verify node.exe exists after move
-                if (-not (Test-Path "$destDir\node.exe")) {
-                    throw "node.exe not found in $destDir after extraction and move"
-                }
-            }
-            finally {
-                if (Test-Path $extractTmp) { 
-                    Remove-ItemWithRetries -Path $extractTmp -Recurse -Force -MaxAttempts 3 -DelayMs 200
-                }
-                if (Test-Path $zipPath) { 
-                    Remove-ItemWithRetries -Path $zipPath -Force -MaxAttempts 3 -DelayMs 200
-                }
-            }
-             
-            Write-Log "Manual installation of Node.js $fullVersion completed."
-        }
+        Write-Log "Setting Node.js $NodeVersion as active version..."
+        $useOutput = & $fnmExe use $NodeVersion 2>&1 | Out-String
+        Write-Log "$useOutput"
         
-        # Verify Install Success
-        $verCheck = Get-ChildItem -Path $nvmPath -Directory -Filter "v$NodeVersion*" | Select-Object -First 1
-        if (-not $verCheck -or -not (Test-Path "$($verCheck.FullName)\node.exe")) { 
-            throw "Node.js install failed: directory missing or empty" 
-        }
+        # fnm stores Node.js in FNM_DIR/node-versions/vX.Y.Z
+        $fnmNodeDir = "$fnmPath\node-versions"
+        $versionDir = Get-ChildItem -Path $fnmNodeDir -Directory -Filter "v$NodeVersion*" | Select-Object -First 1 -ErrorAction SilentlyContinue
         
-        Write-Log "Using Node.js version $NodeVersion..."
-        & cmd /c "$nvmExe" use $NodeVersion
-        
-        $nodePath = "$InstallFolder\nodejs"
-        
-        # Fallback detection if symlink creation failed (common in non-admin)
-        if (-not (Test-Path "$nodePath\node.exe")) {
-            Write-Log "Node.js symlink not found (likely needs Admin rights). Attempting to find versioned directory..." "WARN"
+        if ($versionDir -and (Test-Path "$($versionDir.FullName)\node.exe")) {
+            $nodePath = $versionDir.FullName
+            $Script:ActiveNodePath = $nodePath
+            Write-Log "Found Node.js in fnm directory: $nodePath"
             
-            # Find the actual version directory (e.g., v22.11.0)
-            # nvm-windows installs versions in subdirectories like vX.Y.Z
-            $versionDir = Get-ChildItem -Path $nvmPath -Directory -Filter "v$NodeVersion*" | Select-Object -First 1
-            
-            if ($versionDir -and (Test-Path "$($versionDir.FullName)\node.exe")) {
-                $nodePath = $versionDir.FullName
-                $Script:ActiveNodePath = $nodePath
-                Write-Log "Found Node.js in version directory: $nodePath" "INFO"
-                
-                # Update PATH for this session so npm works
-                $env:Path = "$nodePath;$env:Path"
-            }
+            # Update PATH for this session
+            $env:Path = "$nodePath;$fnmPath;$env:Path"
+        }
+        else {
+            Write-Log "Could not locate Node.js binary after fnm install" "WARN"
+            # Try to get current version from fnm
+            $currentOutput = & $fnmExe current 2>&1 | Out-String
+            Write-Log "fnm current output: $currentOutput" "WARN"
         }
         
         if (Test-Path "$nodePath\node.exe") {
@@ -520,11 +469,32 @@ function Install-Appium {
     }
 }
 
-# Install Appium Driver
-function Install-AppiumDriver {
+# Install Appium Drivers from JSON configuration
+function Install-AppiumDrivers {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$DriversJsonString
+    )
+    
     Write-Log "================================================================" "INF"
-    Write-Log "      STARTING $DriverName DRIVER $DriverVersion INSTALLATION  " "INF"
+    Write-Log "           STARTING APPIUM DRIVERS INSTALLATION                 " "INF"
     Write-Log "================================================================" "INF"
+    
+    # Decode Base64 and parse JSON
+    try {
+        $decodedJson = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($DriversJsonString))
+        $drivers = $decodedJson | ConvertFrom-Json
+        if ($drivers.Count -eq 0) {
+            Write-Log "No drivers configured for installation" "WARN"
+            return
+        }
+        
+        Write-Log "Installing $($drivers.Count) Appium driver(s)..."
+    }
+    catch {
+        Write-Log "Failed to parse drivers JSON: $_" "ERR"
+        throw
+    }
     
     $appiumHome = "$InstallFolder\appium-home"
     $appiumExe = "$appiumHome\node_modules\.bin\appium.cmd"
@@ -541,7 +511,7 @@ function Install-AppiumDriver {
     $nodePath = "$InstallFolder\nodejs"
     if ($Script:ActiveNodePath) { $nodePath = $Script:ActiveNodePath }
     
-    # Ensure node path exists, fallback to versioned directory if symlink not created
+    # Ensure node path exists
     if (-not (Test-Path "$nodePath\node.exe")) {
         Write-Log "Node.js symlink not found, checking versioned directory..." "WARN"
         $versionedPath = Get-ChildItem -Path "$InstallFolder\nvm" -Directory -Filter "v*" | Select-Object -First 1
@@ -549,9 +519,7 @@ function Install-AppiumDriver {
             $nodePath = $versionedPath.FullName
             Write-Log "Using Node.js from versioned directory: $nodePath" "INF"
         } else {
-            Write-ErrorMessage "$DriverName DRIVER INSTALLATION"
-            Write-Log "Node.js not found in expected locations." "ERR"
-            throw "Node.js installation issue"
+            throw "Node.js not found in expected locations"
         }
     }
     
@@ -559,65 +527,208 @@ function Install-AppiumDriver {
     $appiumMajorVersion = $appiumVersionOutput.Split('.')[0]
     Write-Log "Detected Appium version: $appiumVersionOutput (Major: $appiumMajorVersion)"
     
-    Write-Log "Installing $DriverName driver version $DriverVersion..."
+    # Install each driver
+    foreach ($driver in $drivers) {
+        $driverName = $driver.name
+        $driverVersion = $driver.version
+        
+        Write-Log "Installing driver: $driverName@$driverVersion"
+        
+        try {
+            # Check if driver already exists and get version
+            Write-Log "Checking if $driverName driver is already installed..."
+            $driverList = & "$nodePath\node.exe" $appiumScript driver list --installed 2>&1 | Out-String
+            # Strip ANSI color codes for reliable matching
+            $driverListClean = $driverList -replace '\x1b\[[0-9;]*m', ''
+            
+            # Extract installed version using regex
+            $installedVersion = $null
+            if ($driverListClean -match "$driverName@([\d\.]+)") {
+                $installedVersion = $matches[1]
+            }
+            
+            if ($installedVersion) {
+                if ($installedVersion -eq $driverVersion) {
+                    Write-Log "Driver $driverName@$driverVersion already installed with correct version, skipping..."
+                    # Set success exit code to skip fallback
+                    $LASTEXITCODE = 0
+                } else {
+                    Write-Log "Driver $driverName installed with version $installedVersion, updating to $driverVersion..."
+                    & "$nodePath\node.exe" $appiumScript driver update "$driverName@$driverVersion"
+                }
+            } else {
+                Write-Log "Installing new driver $driverName@$driverVersion..."
+                & "$nodePath\node.exe" $appiumScript driver install "$driverName@$driverVersion"
+            }
+            
+            if ($LASTEXITCODE -ne 0) {
+                Write-Log "Driver installation via Appium command failed, trying npm install..." "WARN"
+                if (Test-Path "$nodePath\node.exe") { $env:Path = "$nodePath;$env:Path" }
+                $npmPath = Resolve-NpmPath -nodePath $nodePath
+                if (-not $npmPath) { throw "npm not found for fallback installation" }
+                $driverPackage = "appium-${driverName}-driver"
+                Push-Location $appiumHome
+                Invoke-WithRetries { & $npmPath install "${driverPackage}@$driverVersion" --save --legacy-peer-deps } -MaxAttempts 3 -DelayMs 400
+                Pop-Location
+            }
+            
+            # Verify driver installation
+            Write-Log "Verifying $driverName driver installation..."
+            $driverList = & "$nodePath\node.exe" $appiumScript driver list --installed 2>&1 | Out-String
+            # Strip ANSI color codes for reliable matching
+            $driverListClean = $driverList -replace '\x1b\[[0-9;]*m', ''
+            
+            if ($driverListClean -match $driverName) {
+                Write-Log "✅ $driverName driver installed successfully"
+            } else {
+                Write-Log "⚠️ $driverName driver not found in list, checking directory..." "WARN"
+                $driverDir = "$appiumHome\node_modules\appium-${driverName}-driver"
+                if (Test-Path $driverDir) {
+                    Write-Log "✅ $driverName driver directory exists at $driverDir"
+                } else {
+                    Write-Log "❌ $driverName driver installation may have failed" "WARN"
+                }
+            }
+        }
+        catch {
+            Write-Log "Error installing driver $driverName : $_" "ERR"
+            # Continue with next driver instead of failing completely
+        }
+    }
     
-    try {
-        # Uninstall existing driver
-        Write-Log "Uninstalling any existing $DriverName driver..."
-        & "$nodePath\node.exe" $appiumScript driver uninstall $DriverName 2>$null
-        
-        # Install driver using appropriate command based on version
-        if ($appiumMajorVersion -ge "3") {
-            Write-Log "Using 'driver install' command for Appium $appiumMajorVersion.x"
-            Write-Log "Running: appium driver install $DriverName@$DriverVersion"
-            & "$nodePath\node.exe" $appiumScript driver install "$DriverName@$DriverVersion"
-        }
-        else {
-            Write-Log "Using 'driver install' command for Appium 2.x"
-            Write-Log "Running: appium driver install $DriverName@$DriverVersion"
-            & "$nodePath\node.exe" $appiumScript driver install "$DriverName@$DriverVersion"
-        }
-        
-        if ($LASTEXITCODE -ne 0) {
-            Write-Log "Driver installation via Appium command failed, trying npm install..." "WARN"
-            # Ensure node folder is on PATH for this session
-            if (Test-Path "$nodePath\node.exe") { $env:Path = "$nodePath;$env:Path" }
-            $npmPath = Resolve-NpmPath -nodePath $nodePath
-            if (-not $npmPath) { throw "npm not found for fallback installation" }
-            $driverPackage = "appium-${DriverName}-driver"
-            Push-Location $appiumHome
-            Invoke-WithRetries { & $npmPath install "${driverPackage}@$DriverVersion" --save --legacy-peer-deps } -MaxAttempts 3 -DelayMs 400
-            Pop-Location
-        }
-        
-        # Verify driver installation
-        Write-Log "Verifying $DriverName driver installation..."
-        $driverList = & "$nodePath\node.exe" $appiumScript driver list --installed
-        Write-Log $driverList
-        
-        if ($driverList -match $DriverName) {
-            Write-Log "$DriverName driver appears in installed drivers list"
-            Write-Success "$DriverName DRIVER INSTALLATION"
-        }
-        else {
-            # Check directory existence
-            $driverDir = "$appiumHome\node_modules\appium-${DriverName}-driver"
-            if (Test-Path $driverDir) {
-                Write-Log "$DriverName driver directory exists at $driverDir"
-                Write-Success "$DriverName DRIVER INSTALLATION"
-            }
-            else {
-                throw "$DriverName driver not found after installation"
-            }
-        }
-    }
-    catch {
-        Write-ErrorMessage "$DriverName DRIVER INSTALLATION"
-        Write-Log "Error: $_" "ERR"
-        throw
-    }
+    Write-Success "APPIUM DRIVERS INSTALLATION"
 }
 
+# Install Appium Plugins from JSON configuration
+function Install-AppiumPlugins {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$PluginsJsonString
+    )
+    
+    Write-Log "================================================================" "INF"
+    Write-Log "           STARTING APPIUM PLUGINS INSTALLATION                 " "INF"
+    Write-Log "================================================================" "INF"
+    
+    # Decode Base64 and parse JSON
+    try {
+        $decodedJson = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($PluginsJsonString))
+        $plugins = $decodedJson | ConvertFrom-Json
+        if ($plugins.Count -eq 0) {
+            Write-Log "No plugins configured for installation" "WARN"
+            return
+        }
+        
+        Write-Log "Installing $($plugins.Count) Appium plugin(s)..."
+    }
+    catch {
+        Write-Log "Failed to parse plugins JSON: $_" "ERR"
+        throw
+    }
+    
+    $appiumHome = "$InstallFolder\appium-home"
+    $appiumExe = "$appiumHome\node_modules\.bin\appium.cmd"
+    
+    if (-not (Test-Path $appiumExe)) {
+        Write-Log "Appium not found. Installing Appium first..." "WARN"
+        Install-Appium
+    }
+    
+    $env:APPIUM_HOME = $appiumHome
+    
+    # Detect Appium version
+    $appiumScript = "$appiumHome\node_modules\appium\build\lib\main.js"
+    $nodePath = "$InstallFolder\nodejs"
+    if ($Script:ActiveNodePath) { $nodePath = $Script:ActiveNodePath }
+    
+    # Ensure node path exists
+    if (-not (Test-Path "$nodePath\node.exe")) {
+        Write-Log "Node.js symlink not found, checking versioned directory..." "WARN"
+        $versionedPath = Get-ChildItem -Path "$InstallFolder\nvm" -Directory -Filter "v*" | Select-Object -First 1
+        if ($versionedPath) {
+            $nodePath = $versionedPath.FullName
+            Write-Log "Using Node.js from versioned directory: $nodePath" "INF"
+        } else {
+            throw "Node.js not found in expected locations"
+        }
+    }
+    
+    $appiumVersionOutput = & "$nodePath\node.exe" $appiumScript --version
+    $appiumMajorVersion = $appiumVersionOutput.Split('.')[0]
+    Write-Log "Detected Appium version: $appiumVersionOutput (Major: $appiumMajorVersion)"
+    
+    # Install each plugin
+    foreach ($plugin in $plugins) {
+        $pluginName = $plugin.name
+        $pluginVersion = $plugin.version
+        
+        Write-Log "Installing plugin: $pluginName@$pluginVersion"
+        
+        try {
+            # Check if plugin already exists and get version
+            Write-Log "Checking if $pluginName plugin is already installed..."
+            $pluginList = & "$nodePath\node.exe" $appiumScript plugin list --installed 2>&1 | Out-String
+            # Strip ANSI color codes for reliable matching
+            $pluginListClean = $pluginList -replace '\x1b\[[0-9;]*m', ''
+            
+            # Extract installed version using regex
+            $installedVersion = $null
+            if ($pluginListClean -match "$pluginName@([\d\.]+)") {
+                $installedVersion = $matches[1]
+            }
+            
+            if ($installedVersion) {
+                if ($installedVersion -eq $pluginVersion) {
+                    Write-Log "Plugin $pluginName@$pluginVersion already installed with correct version, skipping..."
+                    # Set success exit code to skip fallback
+                    $LASTEXITCODE = 0
+                } else {
+                    Write-Log "Plugin $pluginName installed with version $installedVersion, updating to $pluginVersion..."
+                    & "$nodePath\node.exe" $appiumScript plugin update "$pluginName@$pluginVersion"
+                }
+            } else {
+                Write-Log "Installing new plugin $pluginName@$pluginVersion..."
+                & "$nodePath\node.exe" $appiumScript plugin install "$pluginName@$pluginVersion"
+            }
+            
+            if ($LASTEXITCODE -ne 0) {
+                Write-Log "Plugin installation via Appium command failed, trying npm install..." "WARN"
+                if (Test-Path "$nodePath\node.exe") { $env:Path = "$nodePath;$env:Path" }
+                $npmPath = Resolve-NpmPath -nodePath $nodePath
+                if (-not $npmPath) { throw "npm not found for fallback installation" }
+                Push-Location $appiumHome
+                Invoke-WithRetries { & $npmPath install "${pluginName}@$pluginVersion" --save --legacy-peer-deps } -MaxAttempts 3 -DelayMs 400
+                Pop-Location
+            }
+            
+            # Verify plugin installation
+            Write-Log "Verifying $pluginName plugin installation..."
+            $pluginList = & "$nodePath\node.exe" $appiumScript plugin list --installed 2>&1 | Out-String
+            # Strip ANSI color codes for reliable matching
+            $pluginListClean = $pluginList -replace '\x1b\[[0-9;]*m', ''
+            
+            if ($pluginListClean -match $pluginName) {
+                Write-Log "✅ $pluginName plugin installed successfully"
+            } else {
+                Write-Log "⚠️ $pluginName plugin not found in list, checking directory..." "WARN"
+                $pluginDir = "$appiumHome\node_modules\$pluginName"
+                if (Test-Path $pluginDir) {
+                    Write-Log "✅ $pluginName plugin directory exists at $pluginDir"
+                } else {
+                    Write-Log "❌ $pluginName plugin installation may have failed" "WARN"
+                }
+            }
+        }
+        catch {
+            Write-Log "Error installing plugin $pluginName : $_" "ERR"
+            # Continue with next plugin instead of failing completely
+        }
+    }
+    
+    Write-Success "APPIUM PLUGINS INSTALLATION"
+}
+
+# Install go-ios for iOS real device support  
 # Install libimobiledevice for iOS device support on Windows
 function Install-LibimobileDevice {
     Write-Log "================================================================" "INF"
@@ -637,7 +748,7 @@ function Install-LibimobileDevice {
     Write-Log "Installing libimobiledevice using Chocolatey (best-effort, optional on Windows)..."
     
     try {
-        Invoke-WithRetries { choco install libimobiledevice -y --no-progress } -MaxAttempts 3 -DelayMs 400
+        Invoke-WithRetries { choco install libimobiledevice -y --no-progress --force } -MaxAttempts 3 -DelayMs 400
         
         # Refresh environment variables
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
@@ -710,7 +821,7 @@ function Install-ITunesDrivers {
     Write-Log "Attempting to install iTunes via Chocolatey..." "INF"
     
     try {
-        Invoke-WithRetries { choco install itunes -y --no-progress } -MaxAttempts 3 -DelayMs 400
+        Invoke-WithRetries { choco install itunes -y --no-progress --force } -MaxAttempts 3 -DelayMs 400
         Write-Log "iTunes installation completed. Please restart your computer for drivers to take effect." "INF"
         Write-Success "ITUNES INSTALLATION"
     }
@@ -836,7 +947,7 @@ function Install-AndroidSDK {
     Write-Log "Installing Android SDK Platform Tools using Chocolatey..."
     
     try {
-        Invoke-WithRetries { choco install adb -y --no-progress } -MaxAttempts 3 -DelayMs 400
+        Invoke-WithRetries { choco install adb -y --no-progress --force } -MaxAttempts 3 -DelayMs 400
         
         # Refresh environment variables
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
@@ -867,7 +978,6 @@ function Install-GoIos {
     Write-Log "           STARTING GO-IOS INSTALLATION                         " "INF"
     Write-Log "================================================================" "INF"
     
-    $goIosVersion = "v1.0.150"
     $goIosDir = "$InstallFolder\.cache\appium-device-farm\goIOS"
     $goIosBin = "$goIosDir\ios\ios.exe"
     
@@ -885,7 +995,8 @@ function Install-GoIos {
         }
     }
     
-    Write-Log "Installing go-ios $goIosVersion for Windows..."
+    Write-Log "Installing go-ios $GoIosVersion for Windows..."
+    Write-Log "This is required for iOS real device support with device-farm plugin"
     
     try {
         # Create directory structure
@@ -899,9 +1010,9 @@ function Install-GoIos {
             New-Item -ItemType Directory -Path $iosDir -Force | Out-Null
         }
         
-        # Download go-ios Windows binary
-        $downloadUrl = "https://github.com/danielpaulus/go-ios/releases/download/$goIosVersion/go-ios-windows.zip"
-        $zipPath = "$env:TEMP\go-ios-windows.zip"
+        # Download go-ios Windows binary (note: filename is go-ios-win.zip, not go-ios-windows.zip)
+        $downloadUrl = "https://github.com/danielpaulus/go-ios/releases/download/$GoIosVersion/go-ios-win.zip"
+        $zipPath = "$env:TEMP\go-ios-win.zip"
         
         Write-Log "Downloading go-ios from $downloadUrl..."
         Invoke-WebRequest -Uri $downloadUrl -OutFile $zipPath -UseBasicParsing
@@ -924,7 +1035,7 @@ function Install-GoIos {
             Write-Success "GO-IOS INSTALLATION"
         }
         else {
-            throw "go-ios binary not found after extraction"
+            throw "go-ios binary not found after extraction at $goIosBin"
         }
         
         # Clean up (use retry wrapper to reduce transient EPERM errors)
@@ -933,8 +1044,10 @@ function Install-GoIos {
     catch {
         Write-ErrorMessage "GO-IOS INSTALLATION"
         Write-Log "Error: $_" "ERR"
-        Write-Log "go-ios installation failed, but this is not critical." "WARN"
-        Write-Log "Device-farm will work with simulators only." "WARN"
+        Write-Log "go-ios installation is CRITICAL for iOS real device support." "ERR"
+        Write-Log "Without go-ios, device-farm plugin will NOT work with iOS real devices." "ERR"
+        Write-Log "You can manually download from: https://github.com/danielpaulus/go-ios/releases" "WARN"
+        throw
     }
 }
 
@@ -1388,31 +1501,51 @@ try {
     Write-Log "================================================================" "INF"
     
     Install-Chocolatey
-    Install-NVM
+    Install-FNM
     Install-NodeJS
     Install-Appium
     
+    # Check if iOS drivers are configured and auto-enable iOS support
+    $needsIOSSupport = $InstallIOSSupport
+    if (-not $needsIOSSupport -and $DriversJson -and $DriversJson -ne "[]") {
+        try {
+            $decodedJson = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($DriversJson))
+            $drivers = $decodedJson | ConvertFrom-Json
+            $iosDrivers = @("xcuitest", "safari", "mac2")
+            foreach ($driver in $drivers) {
+                if ($iosDrivers -contains $driver.name) {
+                    Write-Log "Detected iOS driver '$($driver.name)' - automatically enabling iOS support" "INF"
+                    $needsIOSSupport = $true
+                    break
+                }
+            }
+        }
+        catch {
+            Write-Log "Could not parse drivers JSON for iOS detection: $_" "WARN"
+        }
+    }
+    
     # Install platform-specific components
-    if ($InstallIOSSupport) {
+    if ($needsIOSSupport) {
         Write-Log "Installing iOS support components..."
         Install-ITunesDrivers
         Install-LibimobileDevice
-    }
-
-    if ($InstallXCUITest) {
-        Install-XCUITestDriver
+        Install-GoIos
     }
     
     if ($InstallAndroidSupport) {
         Write-Log "Installing Android support components..."
-        Install-AppiumDriver
         Install-AndroidSDK
     }
     
-    # Install Device Farm plugin if enabled
-    if ($InstallDeviceFarm) {
-        Write-Log "Installing Device Farm plugin and dependencies..."
-        Install-DeviceFarm
+    # Install drivers dynamically from JSON configuration
+    if ($DriversJson -and $DriversJson -ne "[]") {
+        Install-AppiumDrivers -DriversJsonString $DriversJson
+    }
+    
+    # Install plugins dynamically from JSON configuration
+    if ($PluginsJson -and $PluginsJson -ne "[]") {
+        Install-AppiumPlugins -PluginsJsonString $PluginsJson
     }
     
     # Copy Platform scripts before creating wrappers

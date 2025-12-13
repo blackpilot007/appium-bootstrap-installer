@@ -10,9 +10,19 @@ param(
 
 $ErrorActionPreference = "Continue"
 
+# Check for go-ios installation
+$script:GoIosPath = "$InstallDir\.cache\appium-device-farm\goIOS\ios\ios.exe"
+$script:UseGoIosForDevices = $false
+
 # Initialize log file
 if (-not $LogFile) {
-    $LogFile = "$InstallDir\services\logs\DeviceListener_$(Get-Date -Format 'yyyyMMdd').log"
+    # Use logs/ folder relative to executable location (same as Serilog installer logs)
+    $executableDir = Split-Path -Parent $PSCommandPath
+    # Navigate to publish folder if we're in Platform/Windows/Scripts
+    if ($executableDir -match "Platform\\Windows\\Scripts") {
+        $executableDir = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $executableDir))
+    }
+    $LogFile = Join-Path $executableDir "logs\DeviceListener_$(Get-Date -Format 'yyyyMMdd').log"
 }
 
 $logDir = Split-Path $LogFile -Parent
@@ -79,14 +89,65 @@ function Get-AndroidDevices {
     }
 }
 
-# Get iOS device list via idevice_id
+# Get iOS device list via libimobiledevice or go-ios (fallback)
 function Get-iOSDevices {
     try {
+        # Try libimobiledevice first
         $idevicePath = Get-Command idevice_id -ErrorAction SilentlyContinue
-        if (-not $idevicePath) {
+        
+        if (-not $idevicePath -and (Test-Path $script:GoIosPath)) {
+            # Fallback to go-ios
+            if (-not $script:UseGoIosForDevices) {
+                Write-DeviceLog "libimobiledevice not available, using go-ios as fallback" "INFO"
+                $script:UseGoIosForDevices = $true
+            }
+            
+            $output = & $script:GoIosPath list --details 2>&1 | Out-String
+            $devices = @()
+            
+            # Check for device trust/pairing issues
+            if ($output -match "could not retrieve PairRecord" -or $output -match "ReadPair failed") {
+                Write-DeviceLog "═══════════════════════════════════════════════════════════════" "WARN"
+                Write-DeviceLog "  iOS DEVICE DETECTED BUT NOT TRUSTED" "WARN"
+                Write-DeviceLog "═══════════════════════════════════════════════════════════════" "WARN"
+                Write-DeviceLog "Action Required:" "WARN"
+                Write-DeviceLog "  1. Unlock your iPhone/iPad" "WARN"
+                Write-DeviceLog "  2. Look for 'Trust This Computer?' dialog on device" "WARN"
+                Write-DeviceLog "  3. Tap 'Trust' and enter device passcode" "WARN"
+                Write-DeviceLog "  4. Device will appear automatically once trusted" "WARN"
+                Write-DeviceLog "═══════════════════════════════════════════════════════════════" "WARN"
+                return @()
+            }
+            
+            # Parse go-ios list --details output
+            # Format: UDID ModelName ProductVersion ProductName
+            # Example: 00008030-001234567890001E iPhone15,2 17.0.1 iPhone 14 Pro
+            $lines = $output -split "`n"
+            foreach ($line in $lines) {
+                $line = $line.Trim()
+                if ($line -and $line -notmatch "^(DeviceList|Connected)") {
+                    $parts = $line -split "\s+", 4
+                    if ($parts.Count -ge 2) {
+                        $udid = $parts[0]
+                        $deviceName = if ($parts.Count -ge 4) { $parts[3] } else { "Unknown iOS Device" }
+                        
+                        $devices += @{
+                            UDID = $udid
+                            Name = $deviceName
+                            Type = "Device"
+                            Tool = "go-ios"
+                        }
+                    }
+                }
+            }
+            
+            return $devices
+        }
+        elseif (-not $idevicePath) {
             return @()
         }
         
+        # Use libimobiledevice
         $output = & idevice_id -l 2>&1 | Out-String
         $devices = @()
         
@@ -113,6 +174,7 @@ function Get-iOSDevices {
                     UDID = $udid
                     Name = $deviceName
                     Type = "Device"
+                    Tool = "libimobiledevice"
                 }
             }
         }
@@ -137,15 +199,26 @@ function On-DeviceConnected {
         $type = $Device.Type
         Write-DeviceLog "Android $type connected: $serial" "INFO"
         
-        # Optional: Trigger custom actions here
-        # Example: Start Appium session, configure device, etc.
+        # Log where to find Appium service logs
+        $executableDir = Split-Path -Parent $PSCommandPath
+        if ($executableDir -match "Platform\\Windows\\Scripts") {
+            $executableDir = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $executableDir))
+        }
+        $logDir = Join-Path $executableDir "logs"
+        Write-DeviceLog "Service logs will be at: $logDir\Appium-$serial`_stdout.log" "INFO"
     }
     elseif ($Platform -eq "iOS") {
         $udid = $Device.UDID
         $name = $Device.Name
         Write-DeviceLog "iOS Device connected: $name ($udid)" "INFO"
         
-        # Optional: Trigger custom actions here
+        # Log where to find Appium service logs
+        $executableDir = Split-Path -Parent $PSCommandPath
+        if ($executableDir -match "Platform\\Windows\\Scripts") {
+            $executableDir = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $executableDir))
+        }
+        $logDir = Join-Path $executableDir "logs"
+        Write-DeviceLog "Service logs will be at: $logDir\Appium-$udid`_stdout.log" "INFO"
     }
 }
 
@@ -175,8 +248,15 @@ function Monitor-Devices {
     $adbAvailable = $null -ne (Get-Command adb -ErrorAction SilentlyContinue)
     $ideviceAvailable = $null -ne (Get-Command idevice_id -ErrorAction SilentlyContinue)
     
+    # Check for go-ios fallback
+    if (-not $ideviceAvailable -and (Test-Path $script:GoIosPath)) {
+        Write-DeviceLog "libimobiledevice not available, will use go-ios as fallback" "INFO"
+        $script:UseGoIosForDevices = $true
+        $ideviceAvailable = $true
+    }
+    
     Write-DeviceLog "ADB Available: $adbAvailable" "INFO"
-    Write-DeviceLog "idevice_id Available: $ideviceAvailable" "INFO"
+    Write-DeviceLog "iOS tools Available: $ideviceAvailable (using $(if ($script:UseGoIosForDevices) { 'go-ios' } else { 'libimobiledevice' }))" "INFO"
     
     if (-not $adbAvailable -and -not $ideviceAvailable) {
         Write-DeviceLog "No device monitoring tools available. Exiting." "ERROR"

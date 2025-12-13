@@ -57,7 +57,7 @@ The application searches for configuration files in this order:
   // ============================================
   "Drivers": [
     {
-      "Name": "string - Driver name (uiautomator2, xcuitest, etc.)",
+      "Name": "string - Driver name (uiautomator2, xcuitest, espresso, flutter, safari, gecko, etc.)",
       "Version": "string - Driver version (e.g., 3.8.3)",
       "Enabled": "boolean - Enable/disable driver installation"
     }
@@ -68,7 +68,7 @@ The application searches for configuration files in this order:
   // ============================================
   "Plugins": [
     {
-      "Name": "string - Plugin name (device-farm, images, etc.)",
+      "Name": "string - Plugin name (device-farm, appium-dashboard, images, relaxed-caps, etc.)",
       "Version": "string - Plugin version",
       "Enabled": "boolean - Enable/disable plugin installation"
     }

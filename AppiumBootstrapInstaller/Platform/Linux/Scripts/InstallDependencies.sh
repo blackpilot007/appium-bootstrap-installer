@@ -36,15 +36,11 @@ INSTALL_FOLDER="$HOME/.local"
 NODE_VERSION="22"
 APPIUM_VERSION="2.17.1"
 NVM_VERSION="0.40.2"
-XCUITEST_VERSION=""
-UIAUTOMATOR2_VERSION=""
+GO_IOS_VERSION="v1.0.189"
+DRIVERS_JSON="[]"
+PLUGINS_JSON="[]"
 INSTALL_IOS_SUPPORT=false
 INSTALL_ANDROID_SUPPORT=true
-INSTALL_XCUITEST="true"
-INSTALL_UIAUTOMATOR="true"
-INSTALL_DEVICE_FARM="true"
-DEVICEFARM_VERSION="8.3.5"
-DEVICEFARM_DASHBOARD_VERSION="2.0.3"
 
 # Logging functions
 log_info() {
@@ -79,24 +75,16 @@ parse_arguments() {
                 NVM_VERSION="${1#*=}"
                 shift
                 ;;
-            --xcuitest_version=*)
-                XCUITEST_VERSION="${1#*=}"
+            --drivers_json=*)
+                DRIVERS_JSON="${1#*=}"
                 shift
                 ;;
-            --uiautomator2_version=*)
-                UIAUTOMATOR2_VERSION="${1#*=}"
+            --plugins_json=*)
+                PLUGINS_JSON="${1#*=}"
                 shift
                 ;;
-            --install_device_farm=*)
-                INSTALL_DEVICE_FARM="${1#*=}"
-                shift
-                ;;
-            --devicefarm_version=*)
-                DEVICEFARM_VERSION="${1#*=}"
-                shift
-                ;;
-            --devicefarm_dashboard_version=*)
-                DEVICEFARM_DASHBOARD_VERSION="${1#*=}"
+            --go_ios_version=*)
+                GO_IOS_VERSION="${1#*=}"
                 shift
                 ;;
             --install_ios_support|--install_ios_support=true)
@@ -232,11 +220,11 @@ install_go_ios() {
     
     if [ "$os_type" = "darwin" ]; then
         # macOS
-        goios_url="https://github.com/danielpaulus/go-ios/releases/download/v1.0.182/go-ios-mac.zip"
+        goios_url="https://github.com/danielpaulus/go-ios/releases/download/$GO_IOS_VERSION/go-ios-mac.zip"
         zip_file="go-ios-mac.zip"
     elif [ "$os_type" = "linux" ]; then
         # Linux
-        goios_url="https://github.com/danielpaulus/go-ios/releases/download/v1.0.182/go-ios-linux.zip"
+        goios_url="https://github.com/danielpaulus/go-ios/releases/download/$GO_IOS_VERSION/go-ios-linux.zip"
         zip_file="go-ios-linux.zip"
     else
         log_warn "Unsupported OS type: $os_type. Skipping go-ios installation."
@@ -269,7 +257,280 @@ install_go_ios() {
     log_info "go-ios installation completed successfully"
 }
 
-# Install DeviceFarm plugin for Appium
+# Install Appium Drivers from JSON configuration
+install_appium_drivers() {
+    local drivers_json="$1"
+    
+    log_info "================================================================"
+    log_info "           STARTING APPIUM DRIVERS INSTALLATION                 "
+    log_info "================================================================"
+    
+    # Check if jq is available for JSON parsing
+    if ! command_exists jq; then
+        log_warn "jq not found, installing..."
+        if command_exists apt-get; then
+            sudo apt-get update && sudo apt-get install -y jq
+        elif command_exists yum; then
+            sudo yum install -y jq
+        elif command_exists dnf; then
+            sudo dnf install -y jq
+        else
+            log_error "Cannot install jq. Please install manually."
+            return 1
+        fi
+    fi
+    
+    # Parse JSON and count drivers
+    local driver_count=$(echo "$drivers_json" | jq '. | length')
+    
+    if [ "$driver_count" -eq 0 ]; then
+        log_warn "No drivers configured for installation"
+        return 0
+    fi
+    
+    log_info "Installing $driver_count Appium driver(s)..."
+    
+    # Load NVM
+    export NVM_DIR="$HOME/.nvm"
+    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+    nvm use "$NODE_VERSION" || true
+    
+    # Detect Appium version
+    INSTALLED_APPIUM_VERSION=$(appium --version 2>/dev/null || echo "unknown")
+    APPIUM_MAJOR_VERSION=$(echo "$INSTALLED_APPIUM_VERSION" | cut -d'.' -f1)
+    log_info "Detected Appium version: $INSTALLED_APPIUM_VERSION (Major: $APPIUM_MAJOR_VERSION)"
+    
+    # Install each driver
+    local index=0
+    while [ $index -lt $driver_count ]; do
+        local driver_name=$(echo "$drivers_json" | jq -r ".[$index].name")
+        local driver_version=$(echo "$drivers_json" | jq -r ".[$index].version")
+        
+        log_info "Installing driver: ${driver_name}@${driver_version}"
+        
+        # Check if driver already exists and get version
+        log_info "Checking if $driver_name driver is already installed..."
+        local driver_list=$(appium driver list --installed 2>/dev/null || echo "")
+        # Strip ANSI color codes for reliable matching
+        local driver_list_clean=$(echo "$driver_list" | sed 's/\x1b\[[0-9;]*m//g')
+        
+        # Extract installed version
+        local installed_version=""
+        if echo "$driver_list_clean" | grep -q "$driver_name@"; then
+            installed_version=$(echo "$driver_list_clean" | grep -o "$driver_name@[0-9.]*" | cut -d'@' -f2)
+        fi
+        
+        # Install or update driver with retry logic
+        local max_retries=3
+        local retry_count=0
+        local install_success=false
+        
+        # Check if same version already installed
+        if [ -n "$installed_version" ] && [ "$installed_version" = "$driver_version" ]; then
+            log_info "Driver $driver_name@$driver_version already installed with correct version, skipping..."
+            install_success=true
+        else
+            while [ $retry_count -lt $max_retries ] && [ "$install_success" = false ]; do
+                if [ $retry_count -gt 0 ]; then
+                    log_warn "Retry attempt $retry_count of $((max_retries-1))..."
+                    sleep 5
+                fi
+                
+                if [ -n "$installed_version" ]; then
+                    log_info "Driver $driver_name installed with version $installed_version, updating to $driver_version..."
+                    if appium driver update "${driver_name}@${driver_version}"; then
+                        install_success=true
+                    fi
+                else
+                    log_info "Installing new driver ${driver_name}@${driver_version}..."
+                    if appium driver install "${driver_name}@${driver_version}"; then
+                        install_success=true
+                    fi
+                fi
+                
+                retry_count=$((retry_count + 1))
+            done
+        fi
+        
+        if [ "$install_success" = false ]; then
+            log_warn "Failed to install $driver_name driver after $max_retries attempts"
+        else
+            log_info "✅ $driver_name driver installed successfully"
+        fi
+        
+        index=$((index + 1))
+    done
+    
+    log_info "================================================================"
+    log_info "       APPIUM DRIVERS INSTALLATION COMPLETED                    "
+    log_info "================================================================"
+}
+
+# Install Appium Plugins from JSON configuration
+install_appium_plugins() {
+    local plugins_json="$1"
+    
+    log_info "================================================================"
+    log_info "           STARTING APPIUM PLUGINS INSTALLATION                 "
+    log_info "================================================================"
+    
+    # Check if jq is available for JSON parsing
+    if ! command_exists jq; then
+        log_warn "jq not found, installing..."
+        if command_exists apt-get; then
+            sudo apt-get update && sudo apt-get install -y jq
+        elif command_exists yum; then
+            sudo yum install -y jq
+        elif command_exists dnf; then
+            sudo dnf install -y jq
+        else
+            log_error "Cannot install jq. Please install manually."
+            return 1
+        fi
+    fi
+    
+    # Parse JSON and count plugins
+    local plugin_count=$(echo "$plugins_json" | jq '. | length')
+    
+    if [ "$plugin_count" -eq 0 ]; then
+        log_warn "No plugins configured for installation"
+        return 0
+    fi
+    
+    log_info "Installing $plugin_count Appium plugin(s)..."
+    
+    # Load NVM
+    export NVM_DIR="$HOME/.nvm"
+    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+    nvm use "$NODE_VERSION" || true
+    
+    # Detect Appium version
+    INSTALLED_APPIUM_VERSION=$(appium --version 2>/dev/null || echo "unknown")
+    APPIUM_MAJOR_VERSION=$(echo "$INSTALLED_APPIUM_VERSION" | cut -d'.' -f1)
+    log_info "Detected Appium version: $INSTALLED_APPIUM_VERSION (Major: $APPIUM_MAJOR_VERSION)"
+    
+    # Install each plugin
+    local index=0
+    while [ $index -lt $plugin_count ]; do
+        local plugin_name=$(echo "$plugins_json" | jq -r ".[$index].name")
+        local plugin_version=$(echo "$plugins_json" | jq -r ".[$index].version")
+        
+        log_info "Installing plugin: ${plugin_name}@${plugin_version}"
+        
+        # Check if plugin already exists and get version
+        log_info "Checking if $plugin_name plugin is already installed..."
+        local plugin_list=$(appium plugin list --installed 2>/dev/null || echo "")
+        # Strip ANSI color codes for reliable matching
+        local plugin_list_clean=$(echo "$plugin_list" | sed 's/\x1b\[[0-9;]*m//g')
+        
+        # Extract installed version
+        local installed_version=""
+        if echo "$plugin_list_clean" | grep -q "$plugin_name@"; then
+            installed_version=$(echo "$plugin_list_clean" | grep -o "$plugin_name@[0-9.]*" | cut -d'@' -f2)
+        fi
+        
+        # Install or update plugin with retry logic
+        local max_retries=3
+        local retry_count=0
+        local install_success=false
+        
+        # Check if same version already installed
+        if [ -n "$installed_version" ] && [ "$installed_version" = "$plugin_version" ]; then
+            log_info "Plugin $plugin_name@$plugin_version already installed with correct version, skipping..."
+            install_success=true
+        else
+            while [ $retry_count -lt $max_retries ] && [ "$install_success" = false ]; do
+                if [ $retry_count -gt 0 ]; then
+                    log_warn "Retry attempt $retry_count of $((max_retries-1))..."
+                    sleep 5
+                fi
+                
+                if [ -n "$installed_version" ]; then
+                    log_info "Plugin $plugin_name installed with version $installed_version, updating to $plugin_version..."
+                    if appium plugin update "${plugin_name}@${plugin_version}"; then
+                        install_success=true
+                    fi
+                else
+                    log_info "Installing new plugin ${plugin_name}@${plugin_version}..."
+                    if appium plugin install "${plugin_name}@${plugin_version}"; then
+                        install_success=true
+                    fi
+                fi
+                
+                retry_count=$((retry_count + 1))
+            done
+        fi
+        
+        if [ "$install_success" = false ]; then
+            log_warn "Failed to install $plugin_name plugin after $max_retries attempts"
+        else
+            log_info "✅ $plugin_name plugin installed successfully"
+        fi
+        
+        index=$((index + 1))
+    done
+    
+    log_info "================================================================"
+    log_info "       APPIUM PLUGINS INSTALLATION COMPLETED                    "
+    log_info "================================================================"
+}
+
+# Install go-ios for iOS real device support
+install_go_ios() {
+    log_info "================================================================"
+    log_info "           STARTING GO-IOS INSTALLATION                         "
+    log_info "================================================================"
+    
+    # Check if go-ios is already installed
+    if command -v go-ios &> /dev/null; then
+        log_info "go-ios is already installed"
+        go-ios version || log_warn "go-ios version check failed"
+        log_info "✅ go-ios available"
+        return 0
+    fi
+    
+    log_info "Installing go-ios for iOS real device support..."
+    
+    # Detect architecture
+    local arch=$(uname -m)
+    local go_ios_url=""
+    
+    case "$arch" in
+        x86_64|amd64)
+            go_ios_url="https://github.com/danielpaulus/go-ios/releases/latest/download/go-ios-linux"
+            ;;
+        aarch64|arm64)
+            go_ios_url="https://github.com/danielpaulus/go-ios/releases/latest/download/go-ios-linux-arm64"
+            ;;
+        *)
+            log_warn "Unsupported architecture for go-ios: $arch"
+            return 1
+            ;;
+    esac
+    
+    local go_ios_bin="$INSTALL_FOLDER/bin/go-ios"
+    
+    # Download go-ios
+    log_info "Downloading go-ios from $go_ios_url..."
+    if curl -L "$go_ios_url" -o "$go_ios_bin"; then
+        chmod +x "$go_ios_bin"
+        
+        # Verify installation
+        if "$go_ios_bin" version &> /dev/null; then
+            log_info "✅ go-ios installed successfully"
+            "$go_ios_bin" version
+            return 0
+        else
+            log_warn "go-ios downloaded but not functioning properly"
+            return 1
+        fi
+    else
+        log_warn "Failed to download go-ios"
+        return 1
+    fi
+}
+
+# Install DeviceFarm plugin for Appium (Legacy function - kept for backward compatibility)
 install_device_farm() {
     if [ "$INSTALL_DEVICE_FARM" != "true" ]; then
         log_info "Skipping DeviceFarm plugin installation (disabled in configuration)"
@@ -607,19 +868,40 @@ main() {
     install_node
     install_appium
     
-    if [ "$INSTALL_IOS_SUPPORT" = true ]; then
+    # Check if iOS drivers are configured and auto-enable iOS support
+    local needs_ios_support="$INSTALL_IOS_SUPPORT"
+    if [ "$needs_ios_support" = false ] && [ "$DRIVERS_JSON" != "[]" ] && [ -n "$DRIVERS_JSON" ]; then
+        if echo "$DRIVERS_JSON" | grep -qE '"name"\s*:\s*"(xcuitest|safari|mac2)"'; then
+            log_info "Detected iOS driver in configuration - automatically enabling iOS support"
+            needs_ios_support=true
+        fi
+    fi
+    
+    # Install iOS support components if needed
+    if [ "$needs_ios_support" = true ]; then
+        log_info "Installing iOS support components..."
         install_libimobiledevice
-        install_xcuitest_driver
+        install_go_ios
     fi
     
+    # Install Android support components if needed
     if [ "$INSTALL_ANDROID_SUPPORT" = true ]; then
+        log_info "Installing Android support components..."
         install_android_tools
-        install_uiautomator2_driver
     fi
     
-    # Install device-farm if enabled
-    if [ "$INSTALL_DEVICE_FARM" = true ]; then
-        install_device_farm
+    # Install drivers dynamically from JSON configuration
+    if [ "$DRIVERS_JSON" != "[]" ] && [ -n "$DRIVERS_JSON" ]; then
+        install_appium_drivers "$DRIVERS_JSON"
+    else
+        log_warn "No drivers configured in JSON. Skipping driver installation."
+    fi
+    
+    # Install plugins dynamically from JSON configuration
+    if [ "$PLUGINS_JSON" != "[]" ] && [ -n "$PLUGINS_JSON" ]; then
+        install_appium_plugins "$PLUGINS_JSON"
+    else
+        log_warn "No plugins configured in JSON. Skipping plugin installation."
     fi
     
     # Verify installations

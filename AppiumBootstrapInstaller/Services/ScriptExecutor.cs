@@ -17,6 +17,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
 using AppiumBootstrapInstaller.Models;
 using Microsoft.Extensions.Logging;
 
@@ -130,32 +131,30 @@ namespace AppiumBootstrapInstaller.Services
         {
             var args = new List<string>();
 
-            // Common arguments for all platforms
+            // Serialize enabled drivers and plugins to JSON for passing to scripts
+            var enabledDrivers = config.Drivers.Where(d => d.Enabled).ToList();
+            var enabledPlugins = config.Plugins.Where(p => p.Enabled).ToList();
+            
+            // Use source generator context for Native AOT compatibility
+            string driversJson = JsonSerializer.Serialize(enabledDrivers, AppJsonSerializerContext.Default.ListDriverConfig);
+            string pluginsJson = JsonSerializer.Serialize(enabledPlugins, AppJsonSerializerContext.Default.ListPluginConfig);
+
             if (os == OperatingSystem.Windows)
             {
-                // Determine NVM version (prefer platform-specific, fallback to root)
-                string nvmVersion = config.PlatformSpecific?.Windows?.NvmVersion ?? config.NvmVersion;
-
+                // Windows now uses fnm (Fast Node Manager) - no version needed, fetches latest automatically
+                string goIosVersion = config.PlatformSpecific?.Windows?.GoIosVersion ?? "v1.0.189";
 
                 // PowerShell parameters
                 args.Add($"-InstallFolder \"{config.InstallFolder}\"");
                 args.Add($"-NodeVersion \"{config.NodeVersion}\"");
                 args.Add($"-AppiumVersion \"{config.AppiumVersion}\"");
-                args.Add($"-NvmVersion \"{nvmVersion}\"");
-
-                // Drivers
-                var xcuitestDriver = config.Drivers.FirstOrDefault(d => d.Name.Equals("xcuitest", StringComparison.OrdinalIgnoreCase));
-                var uiautomator2Driver = config.Drivers.FirstOrDefault(d => d.Name.Equals("uiautomator2", StringComparison.OrdinalIgnoreCase));
-
-                if (xcuitestDriver != null && !string.IsNullOrEmpty(xcuitestDriver.Version))
-                {
-                    args.Add($"-XCUITestVersion \"{xcuitestDriver.Version}\"");
-                }
-
-                if (uiautomator2Driver != null && !string.IsNullOrEmpty(uiautomator2Driver.Version))
-                {
-                    args.Add($"-DriverVersion \"{uiautomator2Driver.Version}\"");
-                }
+                args.Add($"-GoIosVersion \"{goIosVersion}\"");
+                
+                // Pass drivers and plugins as Base64-encoded JSON to avoid escaping issues
+                string driversBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(driversJson));
+                string pluginsBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(pluginsJson));
+                args.Add($"-DriversJson \"{driversBase64}\"");
+                args.Add($"-PluginsJson \"{pluginsBase64}\"");
 
                 // Platform-specific settings
                 if (config.PlatformSpecific?.Windows != null)
@@ -166,17 +165,6 @@ namespace AppiumBootstrapInstaller.Services
                     if (!winConfig.InstallAndroidSupport)
                         args.Add("-InstallAndroidSupport:$false");
                 }
-
-                // Driver installation flags based on enabled status
-                if (xcuitestDriver != null && !xcuitestDriver.Enabled)
-                    args.Add("-InstallXCUITest:$false");
-                if (uiautomator2Driver != null && !uiautomator2Driver.Enabled)
-                    args.Add("-InstallUiAutomator:$false");
-
-                // Plugin installation flags based on enabled status
-                var deviceFarmPlugin = config.Plugins.FirstOrDefault(p => p.Name.Equals("device-farm", StringComparison.OrdinalIgnoreCase));
-                if (deviceFarmPlugin != null && !deviceFarmPlugin.Enabled)
-                    args.Add("-InstallDeviceFarm:$false");
             }
             else // macOS and Linux use bash-style arguments
             {
@@ -196,20 +184,12 @@ namespace AppiumBootstrapInstaller.Services
                 args.Add($"--node_version=\"{config.NodeVersion}\"");
                 args.Add($"--appium_version=\"{config.AppiumVersion}\"");
                 args.Add($"--nvm_version=\"{nvmVersion}\"");
-
-                // Drivers
-                var xcuitestDriver = config.Drivers.FirstOrDefault(d => d.Name.Equals("xcuitest", StringComparison.OrdinalIgnoreCase));
-                var uiautomator2Driver = config.Drivers.FirstOrDefault(d => d.Name.Equals("uiautomator2", StringComparison.OrdinalIgnoreCase));
-
-                if (xcuitestDriver != null && !string.IsNullOrEmpty(xcuitestDriver.Version))
-                {
-                    args.Add($"--xcuitest_version=\"{xcuitestDriver.Version}\"");
-                }
-
-                if (uiautomator2Driver != null && !string.IsNullOrEmpty(uiautomator2Driver.Version))
-                {
-                    args.Add($"--uiautomator2_version=\"{uiautomator2Driver.Version}\"");
-                }
+                
+                // Pass drivers and plugins as JSON (escape single quotes for bash)
+                string escapedDriversJson = driversJson.Replace("'", "'\\''");
+                string escapedPluginsJson = pluginsJson.Replace("'", "'\\''");
+                args.Add($"--drivers_json='{escapedDriversJson}'");
+                args.Add($"--plugins_json='{escapedPluginsJson}'");
 
                 // Platform-specific settings for macOS
                 if (os == OperatingSystem.MacOS && config.PlatformSpecific?.MacOS != null)
@@ -219,18 +199,11 @@ namespace AppiumBootstrapInstaller.Services
                     {
                         args.Add($"--libimobiledevice_version=\"{macConfig.LibimobiledeviceVersion}\"");
                     }
+                    if (!string.IsNullOrEmpty(macConfig.GoIosVersion))
+                    {
+                        args.Add($"--go_ios_version=\"{macConfig.GoIosVersion}\"");
+                    }
                 }
-
-                // Driver installation flags based on enabled status (macOS/Linux)
-                if (xcuitestDriver != null && !xcuitestDriver.Enabled)
-                    args.Add("--install_xcuitest=false");
-                if (uiautomator2Driver != null && !uiautomator2Driver.Enabled)
-                    args.Add("--install_uiautomator=false");
-
-                // Plugin installation flags based on enabled status (macOS/Linux)
-                var deviceFarmPlugin = config.Plugins.FirstOrDefault(p => p.Name.Equals("device-farm", StringComparison.OrdinalIgnoreCase));
-                if (deviceFarmPlugin != null && !deviceFarmPlugin.Enabled)
-                    args.Add("--install_device_farm=false");
 
                 // Platform-specific settings for Linux
                 if (os == OperatingSystem.Linux && config.PlatformSpecific?.Linux != null)
@@ -240,6 +213,8 @@ namespace AppiumBootstrapInstaller.Services
                         args.Add("--install_ios_support=true");
                     if (!linuxConfig.InstallAndroidSupport)
                         args.Add("--install_android_support=false");
+                    if (!string.IsNullOrEmpty(linuxConfig.GoIosVersion))
+                        args.Add($"--go_ios_version=\"{linuxConfig.GoIosVersion}\"");
                 }
             }
 
@@ -262,7 +237,7 @@ namespace AppiumBootstrapInstaller.Services
             {
                 _logger.LogInformation("Setting execute permissions on: {ScriptPath}", scriptPath);
 
-                var process = new Process
+                using var process = new Process
                 {
                     StartInfo = new ProcessStartInfo
                     {
@@ -276,7 +251,14 @@ namespace AppiumBootstrapInstaller.Services
                 };
 
                 process.Start();
-                process.WaitForExit();
+                process.WaitForExit(5000); // 5 second timeout
+
+                if (!process.HasExited)
+                {
+                    _logger.LogWarning("chmod command timed out, killing process");
+                    process.Kill();
+                    return;
+                }
 
                 if (process.ExitCode != 0)
                 {

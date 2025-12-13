@@ -34,7 +34,7 @@ namespace AppiumBootstrapInstaller.Services
         private readonly HashSet<int> _usedPorts = new(); // Track all allocated ports
         private readonly SemaphoreSlim _portLock = new(1, 1);
         private readonly bool _isWindows;
-        private readonly string? _nssmPath;
+        private readonly string? _servyCliPath;
         private readonly string? _supervisorctlPath;
         private readonly DeviceMetrics _metrics;
 
@@ -53,15 +53,25 @@ namespace AppiumBootstrapInstaller.Services
             // Detect process manager
             if (_isWindows)
             {
-                _nssmPath = Path.Combine(installFolder, "nssm", "nssm.exe");
-                if (!File.Exists(_nssmPath))
+                // Check for Servy CLI in Program Files (default installation)
+                _servyCliPath = @"C:\Program Files\Servy\servy-cli.exe";
+                if (!File.Exists(_servyCliPath))
                 {
-                    _logger.LogWarning("NSSM not found at {Path}. Will use direct process execution.", _nssmPath);
-                    _nssmPath = null;
+                    // Fallback to local installation
+                    _servyCliPath = Path.Combine(installFolder, "servy", "servy-cli.exe");
+                    if (!File.Exists(_servyCliPath))
+                    {
+                        _logger.LogWarning("Servy CLI not found. Will use direct process execution.");
+                        _servyCliPath = null;
+                    }
+                    else
+                    {
+                        _logger.LogInformation("Using Servy CLI for process management: {Path}", _servyCliPath);
+                    }
                 }
                 else
                 {
-                    _logger.LogInformation("Using NSSM for process management: {Path}", _nssmPath);
+                    _logger.LogInformation("Using Servy CLI for process management: {Path}", _servyCliPath);
                 }
             }
             else
@@ -83,29 +93,54 @@ namespace AppiumBootstrapInstaller.Services
         /// </summary>
         public async Task<AppiumSession?> StartSessionAsync(Device device)
         {
-            try
+            const int maxRetries = 3;
+            const int baseDelayMs = 1000;
+            int[]? allocatedPorts = null;
+            
+            for (int attempt = 1; attempt <= maxRetries; attempt++)
             {
-                _logger.LogInformation("Starting Appium session for device {DeviceId}", device.Id);
-
-                // Allocate 3 consecutive ports dynamically for iOS, or 2 for Android
-                int portsNeeded = device.Platform == DevicePlatform.iOS ? 3 : 2;
-                var ports = await AllocateConsecutivePortsAsync(portsNeeded);
-                
-                if (ports == null || ports.Length == 0)
+                try
                 {
-                    _logger.LogError("No available consecutive ports for device {DeviceId}", device.Id);
-                    return null;
-                }
+                    if (attempt > 1)
+                    {
+                        _logger.LogInformation(
+                            "Retry attempt {Attempt}/{MaxRetries} for device {DeviceId}",
+                            attempt, maxRetries, device.Id);
+                    }
+                    else
+                    {
+                        _logger.LogInformation("Starting Appium session for device {DeviceId}", device.Id);
+                    }
 
-                var appiumPort = ports[0];
+                    // Allocate 3 consecutive ports dynamically for iOS, or 2 for Android
+                    int portsNeeded = device.Platform == DevicePlatform.iOS ? 3 : 2;
+                    allocatedPorts = await AllocateConsecutivePortsAsync(portsNeeded);
+                    
+                    if (allocatedPorts == null || allocatedPorts.Length == 0)
+                    {
+                        _logger.LogError("No available consecutive ports for device {DeviceId}", device.Id);
+                        _metrics.RecordPortAllocationFailure();
+                        
+                        // Port exhaustion is likely not transient, don't retry
+                        if (attempt == maxRetries)
+                        {
+                            return null;
+                        }
+                        
+                        // Wait before retry in case ports are being released
+                        await Task.Delay(baseDelayMs * attempt);
+                        continue;
+                    }
+
+                var appiumPort = allocatedPorts[0];
                 int? wdaPort = null;
                 int? mjpegPort = null;
                 int? systemPort = null;
 
                 if (device.Platform == DevicePlatform.iOS)
                 {
-                    wdaPort = ports[1];
-                    mjpegPort = ports[2];
+                    wdaPort = allocatedPorts[1];
+                    mjpegPort = allocatedPorts[2];
                     _logger.LogInformation(
                         "Allocated iOS ports - Appium: {Appium}, WDA: {Wda}, MJPEG: {Mjpeg}",
                         appiumPort, wdaPort, mjpegPort
@@ -113,7 +148,7 @@ namespace AppiumBootstrapInstaller.Services
                 }
                 else if (device.Platform == DevicePlatform.Android)
                 {
-                    systemPort = ports[1];
+                    systemPort = allocatedPorts[1];
                     _logger.LogInformation(
                         "Allocated Android ports - Appium: {Appium}, SystemPort: {System}",
                         appiumPort, systemPort
@@ -125,17 +160,33 @@ namespace AppiumBootstrapInstaller.Services
 
                 // Start Appium using process manager
                 var success = _isWindows
-                    ? await StartWithNssmAsync(serviceName, device, appiumPort, wdaPort, mjpegPort, systemPort)
+                    ? await StartWithServyAsync(serviceName, device, appiumPort, wdaPort, mjpegPort, systemPort)
                     : await StartWithSupervisordAsync(serviceName, device, appiumPort, wdaPort, mjpegPort, systemPort);
 
                 if (!success)
                 {
-                    await ReleasePortsAsync(ports);
+                    await ReleasePortsAsync(allocatedPorts);
+                    allocatedPorts = null;
+                    
+                    // Service start failure might be transient
+                    if (attempt < maxRetries)
+                    {
+                        _logger.LogWarning(
+                            "Failed to start service for {DeviceId}, will retry after delay",
+                            device.Id);
+                        await Task.Delay(baseDelayMs * (int)Math.Pow(2, attempt - 1)); // Exponential backoff
+                        continue;
+                    }
+                    
                     return null;
                 }
 
                 // Get process ID
                 var processId = await GetServiceProcessIdAsync(serviceName);
+
+                // Get log directory for display
+                var executableDir = AppDomain.CurrentDomain.BaseDirectory;
+                var logDir = Path.Combine(executableDir, "logs");
 
                 var session = new AppiumSession
                 {
@@ -149,18 +200,137 @@ namespace AppiumBootstrapInstaller.Services
                     Status = SessionStatus.Running
                 };
 
+                // Log comprehensive device and session information
                 _logger.LogInformation(
-                    "Appium session started for {DeviceId} on port {Port} (Service: {ServiceName})",
-                    device.Id, appiumPort, serviceName
+                    "═══════════════════════════════════════════════════════════════"
+                );
+                _logger.LogInformation(
+                    "Appium Session Started for Device: {DeviceName}",
+                    device.Name
+                );
+                _logger.LogInformation(
+                    "  UDID: {DeviceId}",
+                    device.Id
+                );
+                _logger.LogInformation(
+                    "  Platform: {Platform} | Type: {Type}",
+                    device.Platform, device.Type
+                );
+                _logger.LogInformation(
+                    "  Appium Port: {AppiumPort}",
+                    appiumPort
+                );
+                if (device.Platform == DevicePlatform.iOS)
+                {
+                    _logger.LogInformation(
+                        "  WDA Port: {WdaPort} | MJPEG Port: {MjpegPort}",
+                        wdaPort, mjpegPort
+                    );
+                }
+                else if (device.Platform == DevicePlatform.Android)
+                {
+                    _logger.LogInformation(
+                        "  System Port: {SystemPort}",
+                        systemPort
+                    );
+                }
+                _logger.LogInformation(
+                    "  Service Name: {ServiceName}",
+                    serviceName
+                );
+                _logger.LogInformation(
+                    "  Service Logs: {LogDir}\\{ServiceName}_stdout.log | {LogDir}\\{ServiceName}_stderr.log",
+                    logDir, serviceName, logDir, serviceName
+                );
+                _logger.LogInformation(
+                    "═══════════════════════════════════════════════════════════════"
                 );
 
                 return session;
+                }
+                catch (OperationCanceledException)
+                {
+                    _logger.LogWarning("Session start cancelled for device {DeviceId}", device.Id);
+                    if (allocatedPorts != null)
+                    {
+                        await ReleasePortsAsync(allocatedPorts);
+                    }
+                    return null;
+                }
+                catch (TimeoutException ex)
+                {
+                    _logger.LogWarning(ex, 
+                        "Timeout starting session for device {DeviceId}, attempt {Attempt}/{MaxRetries}",
+                        device.Id, attempt, maxRetries);
+                    
+                    if (allocatedPorts != null)
+                    {
+                        await ReleasePortsAsync(allocatedPorts);
+                        allocatedPorts = null;
+                    }
+                    
+                    if (attempt < maxRetries)
+                    {
+                        await Task.Delay(baseDelayMs * (int)Math.Pow(2, attempt - 1));
+                        continue;
+                    }
+                }
+                catch (IOException ex)
+                {
+                    _logger.LogWarning(ex, 
+                        "I/O error starting session for device {DeviceId}, attempt {Attempt}/{MaxRetries}",
+                        device.Id, attempt, maxRetries);
+                    
+                    if (allocatedPorts != null)
+                    {
+                        await ReleasePortsAsync(allocatedPorts);
+                        allocatedPorts = null;
+                    }
+                    
+                    if (attempt < maxRetries)
+                    {
+                        await Task.Delay(baseDelayMs * (int)Math.Pow(2, attempt - 1));
+                        continue;
+                    }
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    // Permission errors are not transient
+                    _logger.LogError(ex, 
+                        "Permission denied starting session for device {DeviceId}",
+                        device.Id);
+                    
+                    if (allocatedPorts != null)
+                    {
+                        await ReleasePortsAsync(allocatedPorts);
+                    }
+                    return null;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, 
+                        "Failed to start Appium session for device {DeviceId}, attempt {Attempt}/{MaxRetries}",
+                        device.Id, attempt, maxRetries);
+                    
+                    if (allocatedPorts != null)
+                    {
+                        await ReleasePortsAsync(allocatedPorts);
+                        allocatedPorts = null;
+                    }
+                    
+                    if (attempt < maxRetries)
+                    {
+                        await Task.Delay(baseDelayMs * (int)Math.Pow(2, attempt - 1));
+                        continue;
+                    }
+                }
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to start Appium session for device {DeviceId}", device.Id);
-                return null;
-            }
+            
+            // All retries exhausted
+            _logger.LogError(
+                "Failed to start Appium session for device {DeviceId} after {MaxRetries} attempts",
+                device.Id, maxRetries);
+            return null;
         }
 
         /// <summary>
@@ -168,38 +338,90 @@ namespace AppiumBootstrapInstaller.Services
         /// </summary>
         public async Task StopSessionAsync(AppiumSession session)
         {
-            try
+            const int maxRetries = 3;
+            const int timeoutMs = 10000; // 10 seconds
+            
+            for (int attempt = 1; attempt <= maxRetries; attempt++)
             {
-                _logger.LogInformation("Stopping Appium session {SessionId}", session.SessionId);
-
-                var serviceName = session.SessionId; // Session ID is the service name
-
-                if (_isWindows)
+                try
                 {
-                    await StopWithNssmAsync(serviceName);
+                    if (attempt > 1)
+                    {
+                        _logger.LogInformation(
+                            "Retry attempt {Attempt}/{MaxRetries} to stop session {SessionId}",
+                            attempt, maxRetries, session.SessionId);
+                    }
+                    else
+                    {
+                        _logger.LogInformation("Stopping Appium session {SessionId}", session.SessionId);
+                    }
+
+                    var serviceName = session.SessionId; // Session ID is the service name
+
+                    using var cts = new CancellationTokenSource(timeoutMs);
+                    
+                    if (_isWindows)
+                    {
+                        await StopWithServyAsync(serviceName);
+                    }
+                    else
+                    {
+                        await StopWithSupervisordAsync(serviceName);
+                    }
+
+                    // Release ports
+                    await ReleasePortsAsync(new[] { 
+                        session.AppiumPort, 
+                        session.WdaLocalPort ?? 0, 
+                        session.MjpegServerPort ?? 0,
+                        session.SystemPort ?? 0
+                    }.Where(p => p > 0).ToArray());
+
+                    session.Status = SessionStatus.Stopped;
+                    _logger.LogInformation("Successfully stopped session {SessionId}", session.SessionId);
+                    return;
                 }
-                else
+                catch (OperationCanceledException)
                 {
-                    await StopWithSupervisordAsync(serviceName);
+                    _logger.LogWarning(
+                        "Stop operation cancelled for session {SessionId}",
+                        session.SessionId);
+                    return;
                 }
-
-                // Release ports
-                await ReleasePortsAsync(new[] { 
-                    session.AppiumPort, 
-                    session.WdaLocalPort ?? 0, 
-                    session.MjpegServerPort ?? 0,
-                    session.SystemPort ?? 0
-                }.Where(p => p > 0).ToArray());
-
-                session.Status = SessionStatus.Stopped;
+                catch (TimeoutException ex)
+                {
+                    _logger.LogWarning(ex,
+                        "Timeout stopping session {SessionId}, attempt {Attempt}/{MaxRetries}",
+                        session.SessionId, attempt, maxRetries);
+                    
+                    if (attempt < maxRetries)
+                    {
+                        await Task.Delay(2000 * attempt);
+                        continue;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, 
+                        "Failed to stop Appium session {SessionId}, attempt {Attempt}/{MaxRetries}",
+                        session.SessionId, attempt, maxRetries);
+                    
+                    if (attempt < maxRetries)
+                    {
+                        await Task.Delay(2000 * attempt);
+                        continue;
+                    }
+                }
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to stop Appium session {SessionId}", session.SessionId);
-            }
+            
+            // Mark as stopped even if cleanup failed to prevent resource leaks
+            session.Status = SessionStatus.Stopped;
+            _logger.LogWarning(
+                "Session {SessionId} marked as stopped after failed cleanup attempts",
+                session.SessionId);
         }
 
-        private async Task<bool> StartWithNssmAsync(
+        private async Task<bool> StartWithServyAsync(
             string serviceName,
             Device device,
             int appiumPort,
@@ -207,9 +429,9 @@ namespace AppiumBootstrapInstaller.Services
             int? mjpegPort,
             int? systemPort)
         {
-            if (_nssmPath == null)
+            if (_servyCliPath == null)
             {
-                _logger.LogWarning("NSSM not available, cannot start service");
+                _logger.LogWarning("Servy CLI not available, cannot start service");
                 return false;
             }
 
@@ -225,83 +447,93 @@ namespace AppiumBootstrapInstaller.Services
                 var appiumHome = _installFolder;
                 var appiumBin = Path.Combine(_installFolder, "bin");
 
-                // Build NSSM service command
-                var arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{scriptPath}\" " +
+                // Get logs folder relative to executable (same location as Serilog installer logs)
+                var executableDir = AppDomain.CurrentDomain.BaseDirectory;
+                var logDir = Path.Combine(executableDir, "logs");
+                Directory.CreateDirectory(logDir); // Ensure it exists
+
+                // Build PowerShell service command arguments
+                var psArguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{scriptPath}\" " +
                                 $"-AppiumHomePath \"{appiumHome}\" " +
                                 $"-AppiumBinPath \"{appiumBin}\" " +
                                 $"-AppiumPort {appiumPort} " +
                                 $"-WdaLocalPort {wdaPort ?? 0} " +
                                 $"-MpegLocalPort {mjpegPort ?? 0}";
 
+                // Build Servy install command with health monitoring and log rotation
+                var servyArgs = $"install --quiet " +
+                    $"--name=\"{serviceName}\" " +
+                    $"--displayName=\"Appium - {device.Name}\" " +
+                    $"--description=\"Appium server for device {device.Id}\" " +
+                    $"--path=\"powershell.exe\" " +
+                    $"--startupDir=\"{_installFolder}\" " +
+                    $"--params=\"{psArguments}\" " +
+                    $"--startupType=Automatic " +
+                    $"--priority=Normal " +
+                    $"--stdout=\"{logDir}\\{serviceName}_stdout.log\" " +
+                    $"--stderr=\"{logDir}\\{serviceName}_stderr.log\" " +
+                    $"--enableSizeRotation " +
+                    $"--rotationSize=10 " +
+                    $"--maxRotations=5 " +
+                    $"--enableHealth " +
+                    $"--heartbeatInterval=30 " +
+                    $"--maxFailedChecks=3 " +
+                    $"--recoveryAction=RestartProcess " +
+                    $"--maxRestartAttempts=5";
+
                 // Install service
-                _logger.LogDebug("Installing NSSM service: {ServiceName}", serviceName);
-                var installResult = await RunCommandAsync(
-                    _nssmPath,
-                    $"install \"{serviceName}\" \"powershell.exe\" {arguments}"
-                );
+                _logger.LogDebug("Installing Servy service: {ServiceName}", serviceName);
+                var installResult = await RunCommandAsync(_servyCliPath, servyArgs);
 
                 if (installResult.ExitCode != 0)
                 {
-                    _logger.LogError("Failed to install NSSM service: {Error}", installResult.Error);
+                    _logger.LogError("Failed to install Servy service: {Error}", installResult.Error);
                     return false;
                 }
 
-                // Configure service
-                await RunCommandAsync(_nssmPath, $"set \"{serviceName}\" DisplayName \"Appium - {device.Name}\"");
-                await RunCommandAsync(_nssmPath, $"set \"{serviceName}\" Description \"Appium server for device {device.Id}\"");
-                await RunCommandAsync(_nssmPath, $"set \"{serviceName}\" AppDirectory \"{_installFolder}\"");
-                
-                var logDir = Path.Combine(_installFolder, "services", "logs");
-                await RunCommandAsync(_nssmPath, $"set \"{serviceName}\" AppStdout \"{logDir}\\{serviceName}_stdout.log\"");
-                await RunCommandAsync(_nssmPath, $"set \"{serviceName}\" AppStderr \"{logDir}\\{serviceName}_stderr.log\"");
-                
-                // Set restart on failure
-                await RunCommandAsync(_nssmPath, $"set \"{serviceName}\" AppExit Default Restart");
-                await RunCommandAsync(_nssmPath, $"set \"{serviceName}\" AppRestartDelay 5000");
-
                 // Start service
-                _logger.LogDebug("Starting NSSM service: {ServiceName}", serviceName);
-                var startResult = await RunCommandAsync(_nssmPath, $"start \"{serviceName}\"");
+                _logger.LogDebug("Starting Servy service: {ServiceName}", serviceName);
+                var startResult = await RunCommandAsync(_servyCliPath, $"start --quiet --name=\"{serviceName}\"");
 
                 if (startResult.ExitCode != 0)
                 {
-                    _logger.LogError("Failed to start NSSM service: {Error}", startResult.Error);
-                    await RunCommandAsync(_nssmPath, $"remove \"{serviceName}\" confirm");
+                    _logger.LogError("Failed to start Servy service: {Error}", startResult.Error);
+                    await RunCommandAsync(_servyCliPath, $"uninstall --quiet --name=\"{serviceName}\"");
                     return false;
                 }
 
                 // Wait a bit for service to initialize
                 await Task.Delay(2000);
 
-                _logger.LogInformation("NSSM service {ServiceName} started successfully", serviceName);
+                _logger.LogInformation("Servy service {ServiceName} started successfully with health monitoring", serviceName);
                 return true;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error starting NSSM service {ServiceName}", serviceName);
+                _logger.LogError(ex, "Error starting Servy service {ServiceName}", serviceName);
                 return false;
             }
         }
 
-        private async Task StopWithNssmAsync(string serviceName)
+        private async Task StopWithServyAsync(string serviceName)
         {
-            if (_nssmPath == null) return;
+            if (_servyCliPath == null) return;
 
             try
             {
-                _logger.LogDebug("Stopping NSSM service: {ServiceName}", serviceName);
-                await RunCommandAsync(_nssmPath, $"stop \"{serviceName}\"");
+                _logger.LogDebug("Stopping Servy service: {ServiceName}", serviceName);
+                await RunCommandAsync(_servyCliPath, $"stop --quiet --name=\"{serviceName}\"");
                 
                 await Task.Delay(1000);
                 
-                _logger.LogDebug("Removing NSSM service: {ServiceName}", serviceName);
-                await RunCommandAsync(_nssmPath, $"remove \"{serviceName}\" confirm");
+                _logger.LogDebug("Uninstalling Servy service: {ServiceName}", serviceName);
+                await RunCommandAsync(_servyCliPath, $"uninstall --quiet --name=\"{serviceName}\"");
                 
-                _logger.LogInformation("NSSM service {ServiceName} stopped and removed", serviceName);
+                _logger.LogInformation("Servy service {ServiceName} stopped and uninstalled", serviceName);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error stopping NSSM service {ServiceName}", serviceName);
+                _logger.LogError(ex, "Error stopping Servy service {ServiceName}", serviceName);
             }
         }
 
@@ -416,11 +648,11 @@ environment=HOME=""{Environment.GetEnvironmentVariable("HOME")}"",USER=""{Enviro
         {
             try
             {
-                if (_isWindows && _nssmPath != null)
+                if (_isWindows && _servyCliPath != null)
                 {
-                    var result = await RunCommandAsync(_nssmPath, $"status \"{serviceName}\"");
-                    // Parse PID from NSSM status output if available
-                    // For now, return null as NSSM manages the process
+                    var result = await RunCommandAsync(_servyCliPath, $"status --name=\"{serviceName}\"");
+                    // Parse PID from Servy status output if available
+                    // For now, return null as Servy manages the process
                     return null;
                 }
                 else if (_supervisorctlPath != null)

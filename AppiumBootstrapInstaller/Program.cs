@@ -38,7 +38,14 @@ namespace AppiumBootstrapInstaller
                 .WriteTo.Console(
                     theme: AnsiConsoleTheme.Literate,
                     outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
-                .WriteTo.File("logs/installer-.log", rollingInterval: RollingInterval.Day)
+                .WriteTo.File(
+                    path: "logs/installer-.log",
+                    rollingInterval: RollingInterval.Day,
+                    fileSizeLimitBytes: 10_485_760, // 10 MB
+                    retainedFileCountLimit: 30,
+                    rollOnFileSizeLimit: true,
+                    shared: false,
+                    flushToDiskInterval: TimeSpan.FromSeconds(1))
                 .CreateLogger();
 
             try
@@ -181,6 +188,28 @@ namespace AppiumBootstrapInstaller
                 logger.LogInformation("==========================================");
                 logger.LogInformation("  STEP 2/2 COMPLETED: Service Manager Setup Successfully");
                 logger.LogInformation("==========================================");
+
+                // Copy Platform scripts to installation folder for StartAppiumServer.ps1 and other runtime scripts
+                try
+                {
+                    var platformSource = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Platform");
+                    var platformDest = Path.Combine(config.InstallFolder, "Platform");
+                    
+                    if (Directory.Exists(platformSource))
+                    {
+                        logger.LogInformation("Copying Platform scripts to installation folder...");
+                        CopyDirectory(platformSource, platformDest, recursive: true);
+                        logger.LogInformation("Platform scripts copied to: {Destination}", platformDest);
+                    }
+                    else
+                    {
+                        logger.LogWarning("Platform directory not found at: {Source}", platformSource);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Failed to copy Platform scripts");
+                }
 
                 // ============================================
                 // STEP 3: Start Device Listener (if enabled)
@@ -457,6 +486,32 @@ namespace AppiumBootstrapInstaller
                 "The application searches for a 'Platform' directory in the current directory and all parent directories.\n" +
                 "Please ensure the Platform folder is available relative to the executable."
             );
+        }
+
+        static void CopyDirectory(string sourceDir, string destinationDir, bool recursive)
+        {
+            var dir = new DirectoryInfo(sourceDir);
+
+            if (!dir.Exists)
+                throw new DirectoryNotFoundException($"Source directory not found: {dir.FullName}");
+
+            DirectoryInfo[] dirs = dir.GetDirectories();
+            Directory.CreateDirectory(destinationDir);
+
+            foreach (FileInfo file in dir.GetFiles())
+            {
+                string targetFilePath = Path.Combine(destinationDir, file.Name);
+                file.CopyTo(targetFilePath, overwrite: true);
+            }
+
+            if (recursive)
+            {
+                foreach (DirectoryInfo subDir in dirs)
+                {
+                    string newDestinationDir = Path.Combine(destinationDir, subDir.Name);
+                    CopyDirectory(subDir.FullName, newDestinationDir, true);
+                }
+            }
         }
     }
 
