@@ -135,9 +135,9 @@ namespace AppiumBootstrapInstaller
                 // ============================================
                 // STEP 1: Install Dependencies
                 // ============================================
-                logger.LogInformation("==========================================");
-                logger.LogInformation("  STEP 1/2: Installing Dependencies");
-                logger.LogInformation("==========================================");
+                logger.LogWarning("==========================================");
+                logger.LogWarning("  STEP 1/2: Installing Dependencies");
+                logger.LogWarning("==========================================");
 
                 int exitCode = executor.ExecuteScript(scriptPath, arguments, options.DryRun);
 
@@ -150,17 +150,17 @@ namespace AppiumBootstrapInstaller
                     return exitCode;
                 }
 
-                logger.LogInformation("==========================================");
-                logger.LogInformation("  STEP 1/2 COMPLETED: Dependencies Installed Successfully");
-                logger.LogInformation("==========================================");
+                logger.LogWarning("==========================================");
+                logger.LogWarning("  STEP 1/2 COMPLETED: Dependencies Installed Successfully");
+                logger.LogWarning("==========================================");
 
                 // ============================================
                 // STEP 2: Service Setup
                 // ============================================
                 logger.LogInformation("");
-                logger.LogInformation("==========================================");
-                logger.LogInformation("  STEP 2/2: Setting Up Service Manager");
-                logger.LogInformation("==========================================");
+                logger.LogWarning("==========================================");
+                logger.LogWarning("  STEP 2/2: Setting Up Service Manager");
+                logger.LogWarning("==========================================");
 
                 string serviceSetupScriptPath = executor.GetServiceSetupScriptPath(currentOS);
                 logger.LogInformation("Service setup script: {ScriptPath}", serviceSetupScriptPath);
@@ -185,9 +185,9 @@ namespace AppiumBootstrapInstaller
                     return serviceSetupExitCode;
                 }
 
-                logger.LogInformation("==========================================");
-                logger.LogInformation("  STEP 2/2 COMPLETED: Service Manager Setup Successfully");
-                logger.LogInformation("==========================================");
+                logger.LogWarning("==========================================");
+                logger.LogWarning("  STEP 2/2 COMPLETED: Service Manager Setup Successfully");
+                logger.LogWarning("==========================================");
 
                 // Copy Platform scripts to installation folder for StartAppiumServer.ps1 and other runtime scripts
                 try

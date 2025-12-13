@@ -210,7 +210,6 @@ WshShell.Run """$exePath"" --listen --config ""$configPath""", 0, False
         Write-Log "Failed to create startup shortcut: $_" "ERR"
         Write-Log "You can manually run the agent: $exePath --listen" "WARN"
     }
-}
     
     # Find Servy CLI
     $servyCli = "C:\Program Files\Servy\servy-cli.exe"

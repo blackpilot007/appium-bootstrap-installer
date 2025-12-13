@@ -1,5 +1,5 @@
 # InstallDependencies.ps1
-# PowerShell script to install Node.js, fnm, Appium, drivers and plugins on Windows
+# PowerShell script to install Node.js, NVM, Appium, drivers and plugins on Windows
 
 param(
     [string]$InstallFolder = "$env:USERPROFILE\.local",
@@ -14,6 +14,25 @@ param(
 
 # Set error action preference
 $ErrorActionPreference = "Continue"
+
+# ================================================================
+# ISOLATION: Remove global installations from PATH to avoid conflicts
+# ================================================================
+function Initialize-IsolatedEnvironment {
+    # Split PATH and filter out global installations
+    $pathEntries = $env:Path -split ';'
+    $filteredPath = $pathEntries | Where-Object {
+        $_ -notmatch '\\nvm|\\node|\\chocolatey' -and
+        $_ -notmatch 'ProgramData\\chocolatey' -and
+        $_ -notmatch '\.local\\appium'
+    }
+    # Rebuild PATH without global installations
+    $env:Path = ($filteredPath -join ';')
+    Write-Host "Initialized isolated environment (removed global nvm/node/chocolatey from PATH)"
+}
+
+# Initialize isolated environment at script start
+Initialize-IsolatedEnvironment
 
 # Logging functions
 function Write-Log {
@@ -182,6 +201,7 @@ function Install-Chocolatey {
     
     Write-Log "Installing Chocolatey package manager locally..."
     $env:ChocolateyInstall = "$InstallFolder\chocolatey"
+    # PREPEND to PATH to use local Chocolatey, not global
     $env:Path = "$env:ChocolateyInstall\bin;$env:Path"
     
     Set-ExecutionPolicy Bypass -Scope Process -Force
@@ -205,187 +225,179 @@ function Install-Chocolatey {
     }
 }
 
-# Install fnm (Fast Node Manager) - portable, no GUI, no admin required
-function Install-FNM {
+# Install NVM for Windows (portable, no-install version) - no GUI, no admin required
+function Install-NVM {
     Write-Log "================================================================" "INF"
-    Write-Log "               STARTING FNM INSTALLATION                        " "INF"
+    Write-Log "               STARTING NVM INSTALLATION                        " "INF"
     Write-Log "================================================================" "INF"
     
-    $fnmPath = "$InstallFolder\fnm"
-    $fnmExe = "$fnmPath\fnm.exe"
-    $Script:ActiveNodePath = "$InstallFolder\nodejs"
+    $nvmPath = "$InstallFolder\nvm"
+    $nvmExe = "$nvmPath\nvm.exe"
+    $nodejsPath = "$nvmPath\nodejs"
+    $Script:ActiveNodePath = $nodejsPath
 
-    # Check if fnm is already installed
-    if (Test-Path $fnmExe) {
-        Write-Log "fnm is already installed at $fnmPath"
-        $version = & $fnmExe --version 2>&1 | Out-String
-        Write-Log "fnm version: $version"
-        Write-Success "FNM ALREADY INSTALLED"
+    # Check if NVM is already installed
+    if (Test-Path $nvmExe) {
+        Write-Log "NVM is already installed at $nvmPath"
+        $version = & $nvmExe version 2>&1 | Out-String
+        Write-Log "NVM version: $version"
+        Write-Success "NVM ALREADY INSTALLED"
         return
     }
     
-    Write-Log "Installing fnm (Fast Node Manager) - portable, no GUI, no admin required..."
+    Write-Log "Installing NVM for Windows (portable, no-install version) - no GUI, no admin required..."
     
     try {
-        # Get latest fnm release from GitHub
-        Write-Log "Fetching latest fnm release from GitHub..."
-        $releaseUrl = "https://api.github.com/repos/Schniz/fnm/releases/latest"
+        # Get latest nvm-windows release from GitHub
+        Write-Log "Fetching latest nvm-windows release from GitHub..."
+        $releaseUrl = "https://api.github.com/repos/coreybutler/nvm-windows/releases/latest"
         $release = Invoke-RestMethod -Uri $releaseUrl -UseBasicParsing
         
-        # Find a Windows asset (naming changed upstream: e.g. fnm-windows.zip)
-        $asset = $release.assets | Where-Object {
-            $_.name -like "*windows*.zip" -and $_.name -notlike "*arm*"
-        } | Select-Object -First 1
-
-        if (-not $asset) {
-            $asset = $release.assets | Where-Object { $_.name -eq "fnm-windows.zip" } | Select-Object -First 1
-        }
+        # Find nvm-noinstall.zip asset
+        $asset = $release.assets | Where-Object { $_.name -eq "nvm-noinstall.zip" } | Select-Object -First 1
         
         if (-not $asset) {
             $available = ($release.assets | Select-Object -ExpandProperty name) -join ", "
-            throw "Could not find a suitable Windows zip in latest fnm release. Available assets: $available"
+            throw "Could not find nvm-noinstall.zip in latest nvm-windows release. Available assets: $available"
         }
         
         $downloadUrl = $asset.browser_download_url
-        $fnmZipPath = "$env:TEMP\fnm.zip"
+        $nvmZipPath = "$env:TEMP\nvm-noinstall.zip"
         
-        Write-Log "Downloading fnm from $downloadUrl..."
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $fnmZipPath -UseBasicParsing
+        Write-Log "Downloading nvm-noinstall.zip from $downloadUrl..."
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $nvmZipPath -UseBasicParsing
         
-        # Create fnm directory
-        if (-not (Test-Path $fnmPath)) {
-            New-Item -ItemType Directory -Path $fnmPath -Force | Out-Null
+        # Create NVM directory
+        if (-not (Test-Path $nvmPath)) {
+            New-Item -ItemType Directory -Path $nvmPath -Force | Out-Null
         }
         
-        # Extract fnm
-        Write-Log "Extracting fnm to $fnmPath..."
-        Expand-Archive -Path $fnmZipPath -DestinationPath $fnmPath -Force
+        # Extract NVM
+        Write-Log "Extracting NVM to $nvmPath..."
+        Expand-Archive -Path $nvmZipPath -DestinationPath $nvmPath -Force
         
-        # Verify fnm.exe exists (some zips contain nested folders)
-        if (-not (Test-Path $fnmExe)) {
-            $found = Get-ChildItem -Path $fnmPath -Filter 'fnm.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($found) {
-                Copy-Item -Path $found.FullName -Destination $fnmExe -Force
-            }
-        }
-
-        if (-not (Test-Path $fnmExe)) {
-            throw "fnm.exe not found after extraction"
+        # Verify nvm.exe exists
+        if (-not (Test-Path $nvmExe)) {
+            throw "nvm.exe not found after extraction"
         }
         
-        # Set environment variables for current session
-        $env:FNM_DIR = $fnmPath
-        $env:Path = "$fnmPath;$env:Path"
+        # DO NOT create nodejs folder manually - NVM will create it as a symlink/junction during 'nvm use'
+        # Pre-creating it as a directory causes "activation error: NVM_SYMLINK is set to a physical file/directory"
         
-        # Initialize fnm environment immediately after install
-        try {
-            $fnmEnv = & $fnmExe env --shell powershell
-            $fnmEnv | Invoke-Expression
-        }
-        catch {
-            Write-Log "Could not initialize fnm env during install: $_" "WARN"
-        }
+        # Create settings.txt for NVM configuration
+        $settingsContent = @"
+root: $nvmPath
+path: $nodejsPath
+arch: 64
+proxy: none
+"@
+        $settingsPath = "$nvmPath\settings.txt"
+        Set-Content -Path $settingsPath -Value $settingsContent -Encoding ASCII
+        Write-Log "Created settings.txt at $settingsPath"
+        
+        # Set environment variables for current session (nodejs path will be added after nvm use)
+        # PREPEND to PATH to ensure local installation takes precedence over global
+        $env:NVM_HOME = $nvmPath
+        $env:NVM_SYMLINK = $nodejsPath
+        $env:Path = "$nvmPath;$env:Path"
         
         # Clean up
-        if (Test-Path $fnmZipPath) {
-            Remove-Item -Path $fnmZipPath -Force -ErrorAction SilentlyContinue
+        if (Test-Path $nvmZipPath) {
+            Remove-Item -Path $nvmZipPath -Force -ErrorAction SilentlyContinue
         }
         
-        Write-Log "fnm installed successfully at $fnmPath"
+        Write-Log "NVM installed successfully at $nvmPath"
         Write-Log "No GUI prompts, no admin required, fully portable"
-        Write-Success "FNM INSTALLATION"
+        Write-Success "NVM INSTALLATION"
     }
     catch {
-        Write-ErrorMessage "FNM INSTALLATION"
+        Write-ErrorMessage "NVM INSTALLATION"
         Write-Log "Error: $_" "ERR"
         throw
     }
 }
 
-# Install Node.js using fnm
+# Install Node.js using NVM
 function Install-NodeJS {
     Write-Log "================================================================" "INF"
     Write-Log "               STARTING NODE.JS INSTALLATION                    " "INF"
     Write-Log "================================================================" "INF"
     
-    $fnmPath = "$InstallFolder\fnm"
-    $fnmExe = "$fnmPath\fnm.exe"
+    $nvmPath = "$InstallFolder\nvm"
+    $nvmExe = "$nvmPath\nvm.exe"
+    $nodejsPath = "$nvmPath\nodejs"
     
-    if (-not (Test-Path $fnmExe)) {
-        Write-Log "fnm not found. Installing fnm first..." "WARN"
-        Install-FNM
+    if (-not (Test-Path $nvmExe)) {
+        Write-Log "NVM not found. Installing NVM first..." "WARN"
+        Install-NVM
     }
     
-    # Set fnm environment for this session
-    $env:FNM_DIR = $fnmPath
-    $env:Path = "$fnmPath;$env:Path"
-    
-    # Initialize fnm environment properly to avoid "We can't find the necessary environment variables" error
-    try {
-        $fnmEnv = & $fnmExe env --shell powershell
-        $fnmEnv | Invoke-Expression
-    }
-    catch {
-        Write-Log "Could not initialize fnm env: $_" "WARN"
-    }
+    # Set NVM environment for this session (nodejs path added after successful nvm use)
+    # PREPEND to ensure local NVM takes precedence
+    $env:NVM_HOME = $nvmPath
+    $env:NVM_SYMLINK = $nodejsPath
+    $env:Path = "$nvmPath;$env:Path"
     
     # Check if Node.js version is already installed
-    $output = & $fnmExe list 2>&1 | Out-String
-    $nodeInstalled = $output -match "v$NodeVersion"
+    $output = & $nvmExe list 2>&1 | Out-String
+    $nodeInstalled = $output -match "v?$NodeVersion"
     
     if ($nodeInstalled) {
         Write-Log "Node.js version $NodeVersion is already installed"
         try {
-            & $fnmExe use $NodeVersion
+            & $nvmExe use $NodeVersion
         }
         catch {
             $errorMsg = $_.Exception.Message
             Write-Log "Could not switch to Node.js ${NodeVersion}: $errorMsg" "WARN"
-            # Try re-initializing env if it failed
-            $fnmEnv = & $fnmExe env --shell powershell
-            $fnmEnv | Invoke-Expression
-            & $fnmExe use $NodeVersion
         }
         Write-Success "NODE.JS ALREADY INSTALLED"
         return
     }
     
-    Write-Log "Installing Node.js version $NodeVersion using fnm..."
+    Write-Log "Installing Node.js version $NodeVersion using NVM..."
     
     try {
-        # fnm handles download, extraction, and setup automatically (no GUI prompts)
-        Write-Log "Running: fnm install $NodeVersion"
-        $installOutput = & $fnmExe install $NodeVersion 2>&1 | Out-String
+        # NVM handles download and installation automatically (no GUI prompts)
+        Write-Log "Running: nvm install $NodeVersion"
+        $installOutput = & $nvmExe install $NodeVersion 2>&1 | Out-String
         Write-Log "$installOutput"
         
         Write-Log "Setting Node.js $NodeVersion as active version..."
-        $useOutput = & $fnmExe use $NodeVersion 2>&1 | Out-String
+        $useOutput = & $nvmExe use $NodeVersion 2>&1 | Out-String
         Write-Log "$useOutput"
         
-        # fnm stores Node.js in FNM_DIR/node-versions/vX.Y.Z
-        $fnmNodeDir = "$fnmPath\node-versions"
-        $versionDir = Get-ChildItem -Path $fnmNodeDir -Directory -Filter "v$NodeVersion*" | Select-Object -First 1 -ErrorAction SilentlyContinue
+        # Check if nvm use command succeeded (it creates symlink/junction at nodejs path)
+        if ($useOutput -match "activation error" -or $useOutput -match "error") {
+            throw "NVM use command failed: $useOutput"
+        }
         
-        if ($versionDir -and (Test-Path "$($versionDir.FullName)\node.exe")) {
-            $nodePath = $versionDir.FullName
+        # NVM creates symlink/junction in nodejs folder pointing to active version
+        # Wait a moment for the symlink to be created
+        Start-Sleep -Milliseconds 500
+        
+        $versionDir = "$nodejsPath"
+        
+        if (Test-Path "$versionDir\node.exe") {
+            $nodePath = $versionDir
             $Script:ActiveNodePath = $nodePath
-            Write-Log "Found Node.js in fnm directory: $nodePath"
+            Write-Log "Found Node.js in NVM nodejs directory: $nodePath"
             
-            # Update PATH for this session
-            $env:Path = "$nodePath;$fnmPath;$env:Path"
+            # PREPEND to PATH to ensure local Node.js takes precedence over any global installation
+            $env:Path = "$nodePath;$nvmPath;$env:Path"
         }
         else {
-            Write-Log "Could not locate Node.js binary after fnm install" "WARN"
-            # Try to get current version from fnm
-            $currentOutput = & $fnmExe current 2>&1 | Out-String
-            Write-Log "fnm current output: $currentOutput" "WARN"
+            Write-Log "Could not locate Node.js binary after NVM install" "WARN"
+            # Try to list installed versions
+            $listOutput = & $nvmExe list 2>&1 | Out-String
+            Write-Log "NVM list output: $listOutput" "WARN"
         }
         
         if (Test-Path "$nodePath\node.exe") {
             $nodeVersionOutput = & "$nodePath\node.exe" --version
             Write-Log "Node.js version installed: $nodeVersionOutput"
             
-            # Create npm.cmd wrapper immediately if npm-cli.js exists but npm.cmd doesn't
+            # NVM usually creates npm.cmd automatically, but verify
             $npmCmd = Join-Path $nodePath 'npm.cmd'
             if (-not (Test-Path $npmCmd)) {
                 $npmCli = Join-Path $nodePath 'node_modules\npm\bin\npm-cli.js'
@@ -403,7 +415,7 @@ function Install-NodeJS {
                 }
             }
             
-            # Add node path to session PATH so npm commands work
+            # PREPEND node path to session PATH so local npm commands work (not global)
             $env:Path = "$nodePath;$env:Path"
             
             Write-Success "NODE.JS INSTALLATION"
@@ -448,6 +460,12 @@ function Install-Appium {
         throw "npm not found"
     }
     
+    # Configure npm to prevent admin prompts (no symlinks, user-level operations)
+    Write-Log "Configuring npm for non-admin operation..."
+    & $npmPath config set prefix "$appiumHome" --location user
+    & $npmPath config set bin-links false --location user
+    & $npmPath config set global-style false --location user
+    
     Write-Log "Installing Appium $AppiumVersion..."
     
     try {
@@ -460,11 +478,11 @@ function Install-Appium {
         
         # Install Appium
         Write-Log "Running: npm install appium@$AppiumVersion --prefix $appiumHome"
-        Invoke-WithRetries { & $npmPath install "appium@$AppiumVersion" --prefix $appiumHome --legacy-peer-deps } -MaxAttempts 3 -DelayMs 500
+        Invoke-WithRetries { & $npmPath install "appium@$AppiumVersion" --prefix $appiumHome --legacy-peer-deps --no-bin-links } -MaxAttempts 3 -DelayMs 500
 
         if ($LASTEXITCODE -ne 0) {
             Write-Log "First attempt failed, retrying with increased timeout..." "WARN"
-            Invoke-WithRetries { & $npmPath install "appium@$AppiumVersion" --prefix $appiumHome --legacy-peer-deps --network-timeout 100000 } -MaxAttempts 2 -DelayMs 800
+            Invoke-WithRetries { & $npmPath install "appium@$AppiumVersion" --prefix $appiumHome --legacy-peer-deps --no-bin-links --network-timeout 100000 } -MaxAttempts 2 -DelayMs 800
         }
         
         Pop-Location
@@ -610,7 +628,7 @@ function Install-AppiumDrivers {
                 if (-not $npmPath) { throw "npm not found for fallback installation" }
                 $driverPackage = "appium-${driverName}-driver"
                 Push-Location $appiumHome
-                Invoke-WithRetries { & $npmPath install "${driverPackage}@$driverVersion" --save --legacy-peer-deps } -MaxAttempts 3 -DelayMs 400
+                Invoke-WithRetries { & $npmPath install "${driverPackage}@$driverVersion" --save --legacy-peer-deps --no-bin-links } -MaxAttempts 3 -DelayMs 400
                 Pop-Location
             }
             
@@ -739,7 +757,7 @@ function Install-AppiumPlugins {
                 $npmPath = Resolve-NpmPath -nodePath $nodePath
                 if (-not $npmPath) { throw "npm not found for fallback installation" }
                 Push-Location $appiumHome
-                Invoke-WithRetries { & $npmPath install "${pluginName}@$pluginVersion" --save --legacy-peer-deps } -MaxAttempts 3 -DelayMs 400
+                Invoke-WithRetries { & $npmPath install "${pluginName}@$pluginVersion" --save --legacy-peer-deps --no-bin-links } -MaxAttempts 3 -DelayMs 400
                 Pop-Location
             }
             
@@ -1543,7 +1561,7 @@ try {
     Write-Log "================================================================" "INF"
     
     Install-Chocolatey
-    Install-FNM
+    Install-NVM
     Install-NodeJS
     Install-Appium
     

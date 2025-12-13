@@ -15,7 +15,7 @@
 - **Logging**: Serilog with structured logging
 - **Config Format**: JSON with JSON serialization context
 - **Node.js Management**:
-  - **Windows**: `fnm` (Fast Node Manager) - portable, no admin required
+  - **Windows**: `nvm-windows` (portable, no-install version) - no admin required
   - **macOS/Linux**: `nvm` (Node Version Manager) - standard shell-based
 
 ### Key Components
@@ -69,11 +69,10 @@ catch {
 $errorMsg = $_.Exception.Message
 Write-Log "Error: $errorMsg" "ERR"
 
-# Initialize environment for fnm
-$env:FNM_DIR = $fnmPath
-$env:Path = "$fnmPath;$env:Path"
-$fnmEnv = & $fnmExe env --shell powershell
-$fnmEnv | Invoke-Expression
+# Initialize environment for nvm-windows
+$env:NVM_HOME = $nvmPath
+$env:NVM_SYMLINK = $nodejsPath
+$env:Path = "$nvmPath;$nodejsPath;$env:Path"
 ```
 
 ### Bash Script Standards
@@ -103,7 +102,8 @@ export NVM_DIR="$INSTALL_FOLDER/.nvm"
 
 ### Environment Variables
 - **APPIUM_HOME**: Points to installation folder
-- **FNM_DIR**: (Windows) fnm installation directory
+- **NVM_HOME**: (Windows) nvm installation directory
+- **NVM_SYMLINK**: (Windows) nodejs symlink/junction directory
 - **NVM_DIR**: (macOS/Linux) nvm installation directory
 
 ## Common Tasks
@@ -133,7 +133,7 @@ export NVM_DIR="$INSTALL_FOLDER/.nvm"
 - **macOS**: Test on both Intel and Apple Silicon
 - **Linux**: Test on Ubuntu/Debian and RHEL/CentOS
 - Use `RuntimeInformation.IsOSPlatform()` for OS detection
-- Test `fnm` on Windows, `nvm` on Unix
+- Test `nvm-windows` on Windows, `nvm` on Unix
 
 ## File Structure
 
@@ -178,14 +178,18 @@ AppiumBootstrapInstaller/
 
 ## Troubleshooting Guide
 
-### Windows fnm Issues
-**Problem**: "We can't find the necessary environment variables"
+### Windows NVM Issues
+**Problem**: "ERROR open \settings.txt: The system cannot find the file specified"
 ```powershell
-# Solution: Initialize fnm env before use
-$env:FNM_DIR = $fnmPath
-$fnmEnv = & $fnmExe env --shell powershell
-$fnmEnv | Invoke-Expression
-fnm use $NodeVersion
+# Solution: Ensure settings.txt exists in NVM_HOME and environment variable is set
+$settingsContent = @"
+root: $nvmPath
+path: $nodejsPath
+arch: 64
+proxy: none
+"@
+Set-Content -Path "$nvmPath\settings.txt" -Value $settingsContent -Encoding ASCII
+$env:NVM_HOME = $nvmPath
 ```
 
 ### macOS/Linux nvm Issues
@@ -214,8 +218,8 @@ nvm use $NODE_VERSION
 ### Commit Messages
 ```
 feat: Add support for Appium 3.x configuration
-fix: Resolve fnm environment initialization on Windows
-docs: Update installation guide for fnm migration
+fix: Resolve nvm environment initialization on Windows
+docs: Update installation guide for nvm-windows migration
 refactor: Remove legacy NSSM service code
 test: Add device listener integration tests
 ```
@@ -257,7 +261,7 @@ test: Add device listener integration tests
 - ✅ Test on all target platforms
 - ✅ Handle transient failures with retry logic
 - ✅ Document configuration options
-- ✅ Use `fnm` on Windows, `nvm` on Unix
+- ✅ Use `nvm-windows` (portable) on Windows, `nvm` on Unix
 
 ## Questions?
 Refer to existing code patterns in:

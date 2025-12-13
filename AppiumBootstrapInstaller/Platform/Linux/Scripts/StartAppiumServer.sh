@@ -2,85 +2,62 @@
 
 # appium.sh - Linux version
 # Starts Appium server with specified ports
+# Uses explicit fully qualified paths for complete isolation
 
-# Check for minimum number of arguments
-if [ "$#" -lt 3 ]; then
-    echo "Usage: $0 <appium_port> <wda_local_port> <mpeg_local_port>"
-    echo "or: $0 <appium_home_path> <appium_bin_path> <appium_port> <wda_local_port> <mpeg_local_port>"
+# Require all parameters
+if [ "$#" -ne 7 ]; then
+    echo "Usage: $0 <appium_home_path> <appium_bin_path> <node_path> <install_folder> <appium_port> <wda_local_port> <mpeg_local_port>"
     exit 1
 fi
 
-# Debug: Print all arguments
-echo "DEBUG: Total arguments: $#"
-for i in $(seq 1 $#); do
-    echo "DEBUG: Argument $i: ${!i}"
-done
+# Parse arguments - all required for isolation
+APPIUM_HOME="$1"
+APPIUM_BIN="$2"
+NODE_PATH="$3"
+INSTALL_FOLDER="$4"
+APPIUM_PORT="$5"
+WDA_LOCAL_PORT="$6"
+MPEG_LOCAL_PORT="$7"
 
-# Parse arguments
-if [ "$#" -eq 3 ]; then
-    APPIUM_PORT=$1
-    WDA_LOCAL_PORT=$2
-    MPEG_LOCAL_PORT=$3
-elif [ "$#" -eq 5 ]; then
-    CUSTOM_APPIUM_HOME=$1
-    CUSTOM_APPIUM_BIN=$2
-    APPIUM_PORT=$3
-    WDA_LOCAL_PORT=$4
-    MPEG_LOCAL_PORT=$5
-else
-    echo "Error: Unexpected number of arguments: $#"
+echo "========================================="
+echo "Starting Appium Server (Linux)"
+echo "========================================="
+echo "Appium Home: $APPIUM_HOME"
+echo "Node.js Path: $NODE_PATH"
+echo "Install Folder: $INSTALL_FOLDER"
+echo "Appium Port: $APPIUM_PORT"
+echo "WDA Local Port: $WDA_LOCAL_PORT"
+echo "MPEG Local Port: $MPEG_LOCAL_PORT"
+echo "========================================="
+
+# Use explicit fully qualified node path
+NODE_EXE="$NODE_PATH/bin/node"
+
+if [ ! -f "$NODE_EXE" ]; then
+    echo "ERROR: Node.js executable not found at $NODE_EXE"
     exit 1
 fi
 
-# Detect APPIUM_HOME
-if [ -n "$CUSTOM_APPIUM_HOME" ] && [ -d "$CUSTOM_APPIUM_HOME" ]; then
-    echo "Using custom Appium home: $CUSTOM_APPIUM_HOME"
-    APPIUM_HOME="$CUSTOM_APPIUM_HOME"
-elif [ -z "$APPIUM_HOME" ]; then
-    # Try common locations
-    if [ -d "$HOME/.local/appium-home" ]; then
-        APPIUM_HOME="$HOME/.local/appium-home"
-    elif [ -d "$HOME/.appium-bootstrap/appium-home" ]; then
-        APPIUM_HOME="$HOME/.appium-bootstrap/appium-home"
-    elif [ -d "$HOME/.appium" ]; then
-        APPIUM_HOME="$HOME/.appium"
-    else
-        echo "Error: APPIUM_HOME not found"
-        exit 1
-    fi
-fi
+echo "Using local Node.js: $NODE_EXE"
 
-# Find appium executable
-if [ -n "$CUSTOM_APPIUM_BIN" ] && [ -f "$CUSTOM_APPIUM_BIN/appium" ]; then
-    echo "Using custom Appium binary: $CUSTOM_APPIUM_BIN"
-    APPIUM_PATH="$CUSTOM_APPIUM_BIN"
-elif [ -f "$APPIUM_HOME/node_modules/.bin/appium" ]; then
-    APPIUM_PATH="$APPIUM_HOME/node_modules/.bin"
-elif command -v appium &>/dev/null; then
-    APPIUM_PATH=$(dirname $(command -v appium))
-else
-    echo "Error: Appium executable not found"
+# Set APPIUM_HOME explicitly for this process only (not system-wide)
+export APPIUM_HOME="$APPIUM_HOME"
+
+# Prepare Appium script path - use explicit node execution
+APPIUM_SCRIPT="$APPIUM_HOME/node_modules/appium/build/lib/main.js"
+
+if [ ! -f "$APPIUM_SCRIPT" ]; then
+    echo "ERROR: Appium script not found at $APPIUM_SCRIPT"
     exit 1
 fi
 
-# Detect Appium version
-APPIUM_VERSION=$($APPIUM_PATH/appium --version 2>/dev/null)
+# Detect Appium version using explicit node path
+APPIUM_VERSION=$($NODE_EXE "$APPIUM_SCRIPT" --version 2>/dev/null)
 APPIUM_MAJOR_VERSION=$(echo $APPIUM_VERSION | cut -d'.' -f1)
 echo "Detected Appium version: $APPIUM_VERSION (Major: $APPIUM_MAJOR_VERSION)"
 
-# Load NVM if available
-export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
-if [ -s "$NVM_DIR/nvm.sh" ]; then
-    echo "Loading NVM from $NVM_DIR"
-    . "$NVM_DIR/nvm.sh" --no-use > /dev/null 2>&1
-    nvm use default > /dev/null 2>&1 || true
-fi
-
-# Add paths
-export PATH="$APPIUM_HOME/bin:$APPIUM_HOME/node_modules/.bin:$PATH"
-export PATH="$HOME/.local/bin:$PATH"
-
-echo "Node version: $(node --version) | Appium version: $APPIUM_VERSION"
+# No NVM loading or PATH manipulation needed - using fully qualified paths
+echo "Node version: $($NODE_EXE --version)"
 
 # Check for DeviceFarm plugin
 echo "Checking for DeviceFarm plugin..."
@@ -170,14 +147,14 @@ else
     echo "DeviceFarm not installed - plugins: $PLUGIN_LIST"
 fi
 
-# Build Appium command
+# Build Appium command using explicit node and script paths
 # Note: -pa /wd/hub is not required for Appium 2.x and 3.x (defaults to /)
 if [[ "$APPIUM_VERSION" == 3* ]] || [ "$APPIUM_MAJOR_VERSION" = "3" ]; then
     # Appium 3.x
-    APPIUM_CMD="$APPIUM_PATH/appium server -p $APPIUM_PORT --allow-cors --allow-insecure=xcuitest:get_server_logs --default-capabilities '{\"appium:wdaLocalPort\": $WDA_LOCAL_PORT,\"appium:mjpegServerPort\": $MPEG_LOCAL_PORT}' --log-level info --log-timestamp --local-timezone --log-no-colors --use-plugins=$PLUGIN_LIST $PLUGIN_OPTIONS"
+    APPIUM_CMD="$NODE_EXE \"$APPIUM_SCRIPT\" server -p $APPIUM_PORT --allow-cors --allow-insecure=xcuitest:get_server_logs --default-capabilities '{\"appium:wdaLocalPort\": $WDA_LOCAL_PORT,\"appium:mjpegServerPort\": $MPEG_LOCAL_PORT}' --log-level info --log-timestamp --local-timezone --log-no-colors --use-plugins=$PLUGIN_LIST $PLUGIN_OPTIONS"
 else
     # Appium 2.x
-    APPIUM_CMD="$APPIUM_PATH/appium -p $APPIUM_PORT --allow-cors --allow-insecure=get_server_logs --default-capabilities '{\"appium:wdaLocalPort\": $WDA_LOCAL_PORT,\"appium:mjpegServerPort\": $MPEG_LOCAL_PORT}' --log-level info --log-timestamp --local-timezone --log-no-colors --use-plugins=$PLUGIN_LIST $PLUGIN_OPTIONS"
+    APPIUM_CMD="$NODE_EXE \"$APPIUM_SCRIPT\" -p $APPIUM_PORT --allow-cors --allow-insecure=get_server_logs --default-capabilities '{\"appium:wdaLocalPort\": $WDA_LOCAL_PORT,\"appium:mjpegServerPort\": $MPEG_LOCAL_PORT}' --log-level info --log-timestamp --local-timezone --log-no-colors --use-plugins=$PLUGIN_LIST $PLUGIN_OPTIONS"
 fi
 
 echo "Executing: $APPIUM_CMD"

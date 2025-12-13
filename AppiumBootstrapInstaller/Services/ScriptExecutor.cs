@@ -141,7 +141,7 @@ namespace AppiumBootstrapInstaller.Services
 
             if (os == OperatingSystem.Windows)
             {
-                // Windows now uses fnm (Fast Node Manager) - no version needed, fetches latest automatically
+                // Windows now uses nvm-windows (portable, no-install) - no version needed, fetches latest automatically
                 string goIosVersion = config.PlatformSpecific?.Windows?.GoIosVersion ?? "v1.0.189";
 
                 // PowerShell parameters
@@ -273,7 +273,7 @@ namespace AppiumBootstrapInstaller.Services
         }
 
         /// <summary>
-        /// Deletes the installation folder if it exists
+        /// Deletes the installation folder if it exists, with better handling of locked files
         /// </summary>
         public void CleanInstallationFolder(string installFolder)
         {
@@ -282,16 +282,19 @@ namespace AppiumBootstrapInstaller.Services
                 _logger.LogInformation("Cleaning installation folder: {InstallFolder}", installFolder);
                 try
                 {
+                    // Try full delete first (fastest if nothing is locked)
                     Directory.Delete(installFolder, true);
                     _logger.LogInformation("Installation folder cleaned successfully.");
                 }
                 catch (IOException ex)
                 {
-                    _logger.LogWarning("Failed to fully clean installation folder (files in use): {Message}. Continuing installation...", ex.Message);
+                    _logger.LogWarning("Failed to fully clean installation folder (files in use): {Message}. Attempting selective cleanup...", ex.Message);
+                    CleanFolderSelectively(installFolder);
                 }
                 catch (UnauthorizedAccessException ex)
                 {
-                    _logger.LogWarning("Failed to clean installation folder (access denied): {Message}. Continuing installation...", ex.Message);
+                    _logger.LogWarning("Failed to clean installation folder (access denied): {Message}. Attempting selective cleanup...", ex.Message);
+                    CleanFolderSelectively(installFolder);
                 }
                 catch (Exception ex)
                 {
@@ -301,6 +304,65 @@ namespace AppiumBootstrapInstaller.Services
             else
             {
                 _logger.LogInformation("Installation folder does not exist, skipping cleanup: {InstallFolder}", installFolder);
+            }
+        }
+
+        /// <summary>
+        /// Selectively cleans folder contents, skipping locked files/folders
+        /// </summary>
+        private void CleanFolderSelectively(string folderPath)
+        {
+            try
+            {
+                // Delete subdirectories first
+                foreach (var dir in Directory.GetDirectories(folderPath))
+                {
+                    try
+                    {
+                        Directory.Delete(dir, true);
+                        _logger.LogDebug("Deleted directory: {Directory}", Path.GetFileName(dir));
+                    }
+                    catch (IOException)
+                    {
+                        _logger.LogDebug("Skipping locked directory: {Directory}", Path.GetFileName(dir));
+                    }
+                    catch (UnauthorizedAccessException)
+                    {
+                        _logger.LogDebug("Skipping protected directory: {Directory}", Path.GetFileName(dir));
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug("Could not delete directory {Directory}: {Message}", Path.GetFileName(dir), ex.Message);
+                    }
+                }
+
+                // Delete files
+                foreach (var file in Directory.GetFiles(folderPath))
+                {
+                    try
+                    {
+                        File.Delete(file);
+                        _logger.LogDebug("Deleted file: {File}", Path.GetFileName(file));
+                    }
+                    catch (IOException)
+                    {
+                        _logger.LogDebug("Skipping locked file: {File}", Path.GetFileName(file));
+                    }
+                    catch (UnauthorizedAccessException)
+                    {
+                        _logger.LogDebug("Skipping protected file: {File}", Path.GetFileName(file));
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug("Could not delete file {File}: {Message}", Path.GetFileName(file), ex.Message);
+                    }
+                }
+
+                _logger.LogInformation("Selective cleanup completed. Some locked files may remain.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Selective cleanup failed: {Message}. Continuing installation...", ex.Message);
             }
         }
 

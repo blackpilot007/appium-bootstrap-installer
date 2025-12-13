@@ -41,7 +41,7 @@
     ],
     "plugins": [
         {
-            "name": "device-farm",
+            "name": "@appium/device-farm-plugin",
             "version": "8.3.5",
             "enabled": true
         },

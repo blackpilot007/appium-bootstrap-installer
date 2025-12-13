@@ -57,7 +57,7 @@ Understanding how Appium Bootstrap Installer works under the hood.
    │
    ├─► STEP 1: Install Dependencies
    │   ├─ Execute Platform/{OS}/Scripts/InstallDependencies.{ext}
-   │   ├─ Install Node.js via NVM (macOS/Linux) or fnm (Windows)
+   │   ├─ Install Node.js via NVM (all platforms: nvm-windows on Windows, nvm on macOS/Linux)
    │   ├─ Install Appium via npm
    │   ├─ Install configured drivers
    │   └─ Install configured plugins

@@ -35,11 +35,17 @@ if (-not $nodeExe) {
         }
     }
     
-    # Try locating node under fnm
+    # Try locating node under nvm
     if (-not $nodeExe) {
-        $fnmDir = Join-Path $installFolder "fnm\node-versions"
-        if (Test-Path $fnmDir) {
-            $versioned = Get-ChildItem -Path $fnmDir -Directory -Filter "v*" | Sort-Object Name -Descending | Select-Object -First 1
+        $nvmDir = Join-Path $installFolder "nvm\nodejs"
+        if (Test-Path $nvmDir) {
+            $nodeCandidate = Join-Path $nvmDir "node.exe"
+            if (Test-Path $nodeCandidate) { $nodeExe = $nodeCandidate }
+        }
+        # Fallback: check for versioned directories in nvm root
+        if (-not $nodeExe) {
+            $nvmRootDir = Join-Path $installFolder "nvm"
+            $versioned = Get-ChildItem -Path $nvmRootDir -Directory -Filter "v*" | Sort-Object Name -Descending | Select-Object -First 1
             if ($versioned) {
                 $nodeCandidate = Join-Path $versioned.FullName "node.exe"
                 if (Test-Path $nodeCandidate) { $nodeExe = $nodeCandidate }

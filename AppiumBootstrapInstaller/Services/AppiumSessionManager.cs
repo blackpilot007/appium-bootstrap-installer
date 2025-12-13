@@ -399,8 +399,11 @@ namespace AppiumBootstrapInstaller.Services
                 string arguments;
                 string executable;
 
-                var appiumHome = _installFolder;
-                var appiumBin = Path.Combine(_installFolder, "bin");
+                // Use explicit fully qualified paths, not environment variables
+                var appiumHome = Path.Combine(_installFolder, "appium-home");
+                var nvmPath = Path.Combine(_installFolder, "nvm");
+                var nodejsPath = Path.Combine(nvmPath, "nodejs");
+                var appiumBin = appiumHome; // Appium binaries are in appium-home
                 
                 // Get logs folder relative to executable
                 var executableDir = AppDomain.CurrentDomain.BaseDirectory;
@@ -414,6 +417,8 @@ namespace AppiumBootstrapInstaller.Services
                     arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{scriptPath}\" " +
                                 $"-AppiumHomePath \"{appiumHome}\" " +
                                 $"-AppiumBinPath \"{appiumBin}\" " +
+                                $"-NodePath \"{nodejsPath}\" " +
+                                $"-InstallFolder \"{_installFolder}\" " +
                                 $"-AppiumPort {appiumPort} " +
                                 $"-WdaLocalPort {wdaPort ?? 0} " +
                                 $"-MpegLocalPort {mjpegPort ?? 0}";
@@ -425,7 +430,8 @@ namespace AppiumBootstrapInstaller.Services
                         : Path.Combine(_installFolder, "Platform", "Linux", "Scripts", "StartAppiumServer.sh");
                     
                     executable = "/bin/bash";
-                    arguments = $"\"{scriptPath}\" \"{appiumHome}\" \"{appiumBin}\" {appiumPort} {wdaPort ?? 0} {mjpegPort ?? 0}";
+                    // Pass explicit paths instead of relying on environment
+                    arguments = $"\"{scriptPath}\" \"{appiumHome}\" \"{appiumBin}\" \"{nodejsPath}\" \"{_installFolder}\" {appiumPort} {wdaPort ?? 0} {mjpegPort ?? 0}";
                     
                     // Ensure script is executable (Unix only)
                     if (!_isWindows && File.Exists(scriptPath))
@@ -464,8 +470,7 @@ namespace AppiumBootstrapInstaller.Services
                     WorkingDirectory = _installFolder
                 };
 
-                // Set environment variables
-                psi.EnvironmentVariables["APPIUM_HOME"] = appiumHome;
+                // No environment variables needed - using fully qualified paths in scripts
                 
                 _logger.LogInformation("Starting Appium process for {DeviceName} on port {Port}", device.Name, appiumPort);
                 

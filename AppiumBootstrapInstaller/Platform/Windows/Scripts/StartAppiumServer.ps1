@@ -1,5 +1,6 @@
 # appium.ps1 - Windows version
 # Starts Appium server with specified ports and DeviceFarm plugin configuration
+# Uses explicit fully qualified paths for complete isolation from global installations
 
 param(
     [Parameter(Mandatory=$true)]
@@ -7,6 +8,12 @@ param(
     
     [Parameter(Mandatory=$true)]
     [string]$AppiumBinPath,
+    
+    [Parameter(Mandatory=$true)]
+    [string]$NodePath,
+    
+    [Parameter(Mandatory=$true)]
+    [string]$InstallFolder,
     
     [Parameter(Mandatory=$true)]
     [int]$AppiumPort,
@@ -24,57 +31,27 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "Starting Appium Server (Windows)" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "Appium Home: $AppiumHomePath"
-Write-Host "Appium Bin: $AppiumBinPath"
+Write-Host "Node.js Path: $NodePath"
+Write-Host "Install Folder: $InstallFolder"
 Write-Host "Appium Port: $AppiumPort"
 Write-Host "WDA Local Port: $WdaLocalPort"
 Write-Host "MPEG Local Port: $MpegLocalPort"
 Write-Host "========================================" -ForegroundColor Cyan
 
-# Set environment variables
+# Use explicit fully qualified paths - no PATH manipulation needed
+$nodeExe = Join-Path $NodePath "node.exe"
+
+if (-not (Test-Path $nodeExe)) {
+    Write-Host "ERROR: Node.js executable not found at $nodeExe" -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "Using local Node.js: $nodeExe" -ForegroundColor Green
+
+# Set APPIUM_HOME explicitly for this process only (not system-wide)
 $env:APPIUM_HOME = $AppiumHomePath
-$env:PATH = "$AppiumBinPath;$AppiumHomePath\node_modules\.bin;$env:PATH"
 
-# Detect Appium version
-# Prefer invoking Appium via explicit node + main.js to avoid relying on wrappers that need
-# "node" on PATH (non-admin installs often don't create symlinks). Fall back to appium.cmd.
-
-# Try to find node.exe on the system first
-$nodeExe = $null
-try {
-    $nodeExe = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
-} catch {
-    $nodeExe = $null
-}
-
-if (-not $nodeExe) {
-    $installFolder = Split-Path $AppiumBinPath -Parent
-    $nodeJsPath = Join-Path $installFolder "nodejs\node.exe"
-    if (Test-Path $nodeJsPath) {
-        $nodeExe = $nodeJsPath
-    } else {
-        $nvmDir = Join-Path $installFolder "nvm"
-        if (Test-Path $nvmDir) {
-            $versioned = Get-ChildItem -Path $nvmDir -Directory -Filter "v*" | Sort-Object Name -Descending | Select-Object -First 1
-            if ($versioned) {
-                $nodeExe = Join-Path $versioned.FullName "node.exe"
-            }
-        }
-        
-        # Check fnm directory
-        if (-not $nodeExe) {
-            $fnmDir = Join-Path $installFolder "fnm\node-versions"
-            if (Test-Path $fnmDir) {
-                $versioned = Get-ChildItem -Path $fnmDir -Directory -Filter "v*" | Sort-Object Name -Descending | Select-Object -First 1
-                if ($versioned) {
-                    $nodeExe = Join-Path $versioned.FullName "node.exe"
-                }
-            }
-        }
-    }
-}
-
-# Prepare fallback paths
-$appiumCmd = Join-Path $AppiumBinPath "appium.cmd"
+# Prepare fully qualified paths
 $appiumScript = Join-Path $AppiumHomePath "node_modules\appium\build\lib\main.js"
 
 # Try node+main.js first if available
