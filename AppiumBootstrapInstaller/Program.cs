@@ -304,8 +304,7 @@ namespace AppiumBootstrapInstaller
                 logger.LogInformation("  Install Folder: {InstallFolder}", config.InstallFolder);
                 logger.LogInformation("  Poll Interval: {Interval}s", config.DeviceListenerPollInterval);
                 logger.LogInformation("  Auto Start Appium: {AutoStart}", config.AutoStartAppium);
-                logger.LogInformation("  Appium Port Range: {Start}-{End}", 
-                    config.PortRanges.AppiumStart, config.PortRanges.AppiumEnd);
+                logger.LogInformation("  Port Allocation: Dynamic (consecutive 4-digit ports)");
                 logger.LogInformation("");
                 logger.LogInformation("Press Ctrl+C to stop...");
 

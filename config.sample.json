@@ -30,16 +30,6 @@
     "enableDeviceListener": false,
     "deviceListenerPollInterval": 5,
     "autoStartAppium": true,
-    "portRanges": {
-        "appiumStart": 4723,
-        "appiumEnd": 4823,
-        "wdaStart": 8100,
-        "wdaEnd": 8200,
-        "mjpegStart": 9100,
-        "mjpegEnd": 9200,
-        "systemPortStart": 8200,
-        "systemPortEnd": 8300
-    },
     "deviceRegistry": {
         "enabled": true,
         "filePath": "device-registry.json",

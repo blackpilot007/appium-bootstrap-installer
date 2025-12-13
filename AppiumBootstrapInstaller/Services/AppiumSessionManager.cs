@@ -15,6 +15,7 @@
  */
 
 using System.Diagnostics;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using AppiumBootstrapInstaller.Models;
@@ -30,10 +31,7 @@ namespace AppiumBootstrapInstaller.Services
         private readonly ILogger<AppiumSessionManager> _logger;
         private readonly string _installFolder;
         private readonly PortRangeConfig _portConfig;
-        private readonly HashSet<int> _usedAppiumPorts = new();
-        private readonly HashSet<int> _usedWdaPorts = new();
-        private readonly HashSet<int> _usedMjpegPorts = new();
-        private readonly HashSet<int> _usedSystemPorts = new();
+        private readonly HashSet<int> _usedPorts = new(); // Track all allocated ports
         private readonly SemaphoreSlim _portLock = new(1, 1);
         private readonly bool _isWindows;
         private readonly string? _nssmPath;
@@ -89,26 +87,37 @@ namespace AppiumBootstrapInstaller.Services
             {
                 _logger.LogInformation("Starting Appium session for device {DeviceId}", device.Id);
 
-                // Allocate ports
-                var appiumPort = await AllocatePortAsync(_portConfig.AppiumStart, _portConfig.AppiumEnd, _usedAppiumPorts);
-                if (appiumPort == 0)
+                // Allocate 3 consecutive ports dynamically for iOS, or 2 for Android
+                int portsNeeded = device.Platform == DevicePlatform.iOS ? 3 : 2;
+                var ports = await AllocateConsecutivePortsAsync(portsNeeded);
+                
+                if (ports == null || ports.Length == 0)
                 {
-                    _logger.LogError("No available Appium ports");
+                    _logger.LogError("No available consecutive ports for device {DeviceId}", device.Id);
                     return null;
                 }
 
+                var appiumPort = ports[0];
                 int? wdaPort = null;
                 int? mjpegPort = null;
                 int? systemPort = null;
 
                 if (device.Platform == DevicePlatform.iOS)
                 {
-                    wdaPort = await AllocatePortAsync(_portConfig.WdaStart, _portConfig.WdaEnd, _usedWdaPorts);
-                    mjpegPort = await AllocatePortAsync(_portConfig.MjpegStart, _portConfig.MjpegEnd, _usedMjpegPorts);
+                    wdaPort = ports[1];
+                    mjpegPort = ports[2];
+                    _logger.LogInformation(
+                        "Allocated iOS ports - Appium: {Appium}, WDA: {Wda}, MJPEG: {Mjpeg}",
+                        appiumPort, wdaPort, mjpegPort
+                    );
                 }
                 else if (device.Platform == DevicePlatform.Android)
                 {
-                    systemPort = await AllocatePortAsync(_portConfig.SystemPortStart, _portConfig.SystemPortEnd, _usedSystemPorts);
+                    systemPort = ports[1];
+                    _logger.LogInformation(
+                        "Allocated Android ports - Appium: {Appium}, SystemPort: {System}",
+                        appiumPort, systemPort
+                    );
                 }
 
                 // Create service name (sanitize device ID for service naming)
@@ -121,7 +130,7 @@ namespace AppiumBootstrapInstaller.Services
 
                 if (!success)
                 {
-                    await ReleasePortsAsync(appiumPort, wdaPort, mjpegPort, systemPort);
+                    await ReleasePortsAsync(ports);
                     return null;
                 }
 
@@ -175,12 +184,12 @@ namespace AppiumBootstrapInstaller.Services
                 }
 
                 // Release ports
-                await ReleasePortsAsync(
-                    session.AppiumPort,
-                    session.WdaLocalPort,
-                    session.MjpegServerPort,
-                    session.SystemPort
-                );
+                await ReleasePortsAsync(new[] { 
+                    session.AppiumPort, 
+                    session.WdaLocalPort ?? 0, 
+                    session.MjpegServerPort ?? 0,
+                    session.SystemPort ?? 0
+                }.Where(p => p > 0).ToArray());
 
                 session.Status = SessionStatus.Stopped;
             }
@@ -486,50 +495,60 @@ environment=HOME=""{Environment.GetEnvironmentVariable("HOME")}"",USER=""{Enviro
             return (process.ExitCode, output, error);
         }
 
-        private async Task<int> AllocatePortAsync(int start, int end, HashSet<int> usedPorts)
+        /// <summary>
+        /// Allocates N consecutive ports starting from a 4-digit port
+        /// </summary>
+        private async Task<int[]?> AllocateConsecutivePortsAsync(int count)
         {
             await _portLock.WaitAsync();
             try
             {
-                var totalPorts = end - start + 1;
-                var availablePorts = totalPorts - usedPorts.Count;
-                var usagePercent = (double)usedPorts.Count / totalPorts * 100;
+                // Start from 4-digit range (1000-9999)
+                const int minPort = 1000;
+                const int maxPort = 65535 - 10; // Leave room for consecutive ports
 
-                // Warn if running low on ports
-                if (usagePercent >= 90)
+                // Try to find consecutive available ports
+                for (int startPort = minPort; startPort <= maxPort; startPort++)
                 {
-                    _logger.LogWarning(
-                        "Port pool critically low: {Used}/{Total} ports used ({Percent:F1}%). Range: {Start}-{End}",
-                        usedPorts.Count, totalPorts, usagePercent, start, end
-                    );
-                }
-                else if (usagePercent >= 70)
-                {
-                    _logger.LogWarning(
-                        "Port pool running low: {Used}/{Total} ports used ({Percent:F1}%). Range: {Start}-{End}",
-                        usedPorts.Count, totalPorts, usagePercent, start, end
-                    );
-                }
-
-                for (int port = start; port <= end; port++)
-                {
-                    if (!usedPorts.Contains(port) && IsPortAvailable(port))
+                    // Check if this port and the next (count-1) ports are all available
+                    bool allAvailable = true;
+                    var portsToCheck = new int[count];
+                    
+                    for (int i = 0; i < count; i++)
                     {
-                        usedPorts.Add(port);
-                        _logger.LogDebug(
-                            "Allocated port {Port} from range {Start}-{End} ({Available} available)",
-                            port, start, end, availablePorts - 1
+                        int port = startPort + i;
+                        portsToCheck[i] = port;
+                        
+                        if (_usedPorts.Contains(port) || !IsPortAvailable(port))
+                        {
+                            allAvailable = false;
+                            break;
+                        }
+                    }
+
+                    if (allAvailable)
+                    {
+                        // Reserve all ports
+                        foreach (var port in portsToCheck)
+                        {
+                            _usedPorts.Add(port);
+                        }
+
+                        _logger.LogInformation(
+                            "Allocated {Count} consecutive ports starting at {StartPort}: {Ports}",
+                            count, startPort, string.Join(", ", portsToCheck)
                         );
-                        return port;
+
+                        return portsToCheck;
                     }
                 }
                 
                 _metrics.RecordPortAllocationFailure();
                 _logger.LogError(
-                    "No available ports in range {Start}-{End}. All {Total} ports are in use.",
-                    start, end, end - start + 1
+                    "No {Count} consecutive available ports found in range {Min}-{Max}",
+                    count, minPort, maxPort
                 );
-                return 0;
+                return null;
             }
             finally
             {
@@ -537,15 +556,26 @@ environment=HOME=""{Environment.GetEnvironmentVariable("HOME")}"",USER=""{Enviro
             }
         }
 
-        private async Task ReleasePortsAsync(int appiumPort, int? wdaPort, int? mjpegPort, int? systemPort)
+        /// <summary>
+        /// Releases allocated ports back to the pool
+        /// </summary>
+        private async Task ReleasePortsAsync(int[] ports)
         {
             await _portLock.WaitAsync();
             try
             {
-                _usedAppiumPorts.Remove(appiumPort);
-                if (wdaPort.HasValue) _usedWdaPorts.Remove(wdaPort.Value);
-                if (mjpegPort.HasValue) _usedMjpegPorts.Remove(mjpegPort.Value);
-                if (systemPort.HasValue) _usedSystemPorts.Remove(systemPort.Value);
+                foreach (var port in ports)
+                {
+                    _usedPorts.Remove(port);
+                }
+                
+                if (ports.Length > 0)
+                {
+                    _logger.LogDebug(
+                        "Released ports: {Ports}",
+                        string.Join(", ", ports)
+                    );
+                }
             }
             finally
             {

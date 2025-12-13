@@ -123,33 +123,12 @@ namespace AppiumBootstrapInstaller.Models
     }
 
     /// <summary>
-    /// Port allocation configuration
+    /// Port allocation configuration - uses dynamic consecutive port allocation
     /// </summary>
     public class PortRangeConfig
     {
-        [JsonPropertyName("appiumStart")]
-        public int AppiumStart { get; set; } = 4723;
-
-        [JsonPropertyName("appiumEnd")]
-        public int AppiumEnd { get; set; } = 4823;
-
-        [JsonPropertyName("wdaStart")]
-        public int WdaStart { get; set; } = 8100;
-
-        [JsonPropertyName("wdaEnd")]
-        public int WdaEnd { get; set; } = 8200;
-
-        [JsonPropertyName("mjpegStart")]
-        public int MjpegStart { get; set; } = 9100;
-
-        [JsonPropertyName("mjpegEnd")]
-        public int MjpegEnd { get; set; } = 9200;
-
-        [JsonPropertyName("systemPortStart")]
-        public int SystemPortStart { get; set; } = 8200;
-
-        [JsonPropertyName("systemPortEnd")]
-        public int SystemPortEnd { get; set; } = 8300;
+        // No explicit configuration needed - ports are allocated dynamically
+        // This class remains for backward compatibility but is essentially empty
     }
 
     /// <summary>
