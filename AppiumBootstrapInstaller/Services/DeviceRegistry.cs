@@ -17,6 +17,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using AppiumBootstrapInstaller.Models;
+using AppiumBootstrapInstaller.Services.Interfaces;
 using Microsoft.Extensions.Logging;
 
 #pragma warning disable IL2026 // Members annotated with 'RequiresUnreferencedCodeAttribute' require dynamic access otherwise can break functionality when trimming application code
@@ -26,7 +27,7 @@ namespace AppiumBootstrapInstaller.Services
     /// <summary>
     /// Manages device registry and persistence
     /// </summary>
-    public class DeviceRegistry
+    public class DeviceRegistry : IDeviceRegistry
     {
         private readonly ILogger<DeviceRegistry> _logger;
         private readonly DeviceRegistryConfig _config;
@@ -178,7 +179,7 @@ namespace AppiumBootstrapInstaller.Services
             }
         }
 
-        private void SaveToDisk() => SaveToDiskAsync().GetAwaiter().GetResult();
+        public void SaveToDisk() => SaveToDiskAsync().GetAwaiter().GetResult();
 
         private void LoadFromDisk()
         {

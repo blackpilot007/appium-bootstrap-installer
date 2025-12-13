@@ -17,6 +17,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using AppiumBootstrapInstaller.Models;
+using AppiumBootstrapInstaller.Services.Interfaces;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -30,9 +31,10 @@ namespace AppiumBootstrapInstaller.Services
         private readonly ILogger<DeviceListenerService> _logger;
         private readonly InstallConfig _config;
         private readonly string _installFolder;
-        private readonly DeviceRegistry _registry;
-        private readonly AppiumSessionManager _sessionManager;
-        private readonly DeviceMetrics _metrics;
+        private readonly IDeviceRegistry _registry;
+        private readonly IAppiumSessionManager _sessionManager;
+        private readonly IDeviceMetrics _metrics;
+        private readonly IEventBus _eventBus;
         private Timer? _metricsTimer;
         private string? _goIosPath;
         private bool _useGoIosForDevices = false;
@@ -41,9 +43,10 @@ namespace AppiumBootstrapInstaller.Services
             ILogger<DeviceListenerService> logger,
             InstallConfig config,
             string installFolder,
-            DeviceRegistry registry,
-            AppiumSessionManager sessionManager,
-            DeviceMetrics metrics)
+            IDeviceRegistry registry,
+            IAppiumSessionManager sessionManager,
+            IDeviceMetrics metrics,
+            IEventBus eventBus)
         {
             _logger = logger;
             _config = config;
@@ -51,6 +54,7 @@ namespace AppiumBootstrapInstaller.Services
             _registry = registry;
             _sessionManager = sessionManager;
             _metrics = metrics;
+            _eventBus = eventBus;
             
             // Check for go-ios installation
             var goIosBin = Path.Combine(_installFolder, ".cache", "appium-device-farm", "goIOS", "ios", "ios.exe");
@@ -457,8 +461,11 @@ namespace AppiumBootstrapInstaller.Services
                     correlationId, device.Id, device.Platform, device.Type, device.Name
                 );
 
-                _metrics.RecordDeviceConnected(device.Platform.ToString());
+                _metrics.RecordDeviceConnected(device.Platform, device.Type);
                 _registry.AddOrUpdateDevice(device);
+                
+                // Publish device connected event
+                _eventBus.Publish(new DeviceConnectedEvent(device));
 
                 // If this is an iOS device and auto-start is enabled, ensure a
                 // prebuilt WDA path/URL is configured. Building WDA on Windows
@@ -472,7 +479,7 @@ namespace AppiumBootstrapInstaller.Services
                     {
                         if (string.IsNullOrWhiteSpace(_config.PrebuiltWdaPath))
                         {
-                            _metrics.RecordSessionFailed("NoPrebuiltWda");
+                            _metrics.RecordSessionFailed(device.Platform, "NoPrebuiltWda");
                             _logger.LogWarning(
                                 "[{CorrelationId}] AutoStartAppium is enabled but no 'prebuiltWdaPath' is configured. Running on Windows/Linux so building WDA is not supported; skipping iOS Appium session start for {DeviceId}. To enable, set 'prebuiltWdaPath' in config to a path or URL to a signed/prebuilt WDA bundle on a macOS host.",
                                 correlationId, device.Id
@@ -503,10 +510,13 @@ namespace AppiumBootstrapInstaller.Services
                         if (session != null)
                         {
                             var duration = DateTime.UtcNow - startTime;
-                            _metrics.RecordSessionStarted(duration);
+                            _metrics.RecordSessionStarted(device.Platform);
                             
                             device.AppiumSession = session;
                             _registry.AddOrUpdateDevice(device);
+                            
+                            // Publish session started event
+                            _eventBus.Publish(new SessionStartedEvent(device, session));
 
                             // Log service log paths for easy troubleshooting
                             var executableDir = AppDomain.CurrentDomain.BaseDirectory;
@@ -526,7 +536,11 @@ namespace AppiumBootstrapInstaller.Services
                         }
                         else
                         {
-                            _metrics.RecordSessionFailed("StartSessionReturnedNull");
+                            _metrics.RecordSessionFailed(device.Platform, "StartSessionReturnedNull");
+                            
+                            // Publish session failed event
+                            _eventBus.Publish(new SessionFailedEvent(device, "StartSessionReturnedNull"));
+                            
                             _logger.LogWarning(
                                 "[{CorrelationId}] Failed to start Appium session for {DeviceId} - returned null",
                                 correlationId, device.Id
@@ -535,7 +549,11 @@ namespace AppiumBootstrapInstaller.Services
                     }
                     catch (Exception ex)
                     {
-                        _metrics.RecordSessionFailed(ex.GetType().Name);
+                        _metrics.RecordSessionFailed(device.Platform, ex.GetType().Name);
+                        
+                        // Publish session failed event
+                        _eventBus.Publish(new SessionFailedEvent(device, ex.Message));
+                        
                         _logger.LogError(ex,
                             "[{CorrelationId}] Exception starting Appium session for {DeviceId}",
                             correlationId, device.Id
@@ -562,14 +580,19 @@ namespace AppiumBootstrapInstaller.Services
                     correlationId, deviceId
                 );
 
-                _metrics.RecordDeviceDisconnected(device.Platform.ToString());
-
+                _metrics.RecordDeviceDisconnected(device.Platform);
+                
                 if (device.AppiumSession != null)
                 {
+                    var session = device.AppiumSession;
                     try
                     {
-                        await _sessionManager.StopSessionAsync(device.AppiumSession);
-                        _metrics.RecordSessionStopped();
+                        await _sessionManager.StopSessionAsync(device);
+                        _metrics.RecordSessionStopped(device.Platform);
+                        
+                        // Publish session stopped event
+                        _eventBus.Publish(new SessionStoppedEvent(device, session));
+                        
                         _logger.LogInformation(
                             "[{CorrelationId}] Appium session stopped for {DeviceId}",
                             correlationId, deviceId
@@ -595,7 +618,7 @@ namespace AppiumBootstrapInstaller.Services
             {
                 if (device.AppiumSession != null)
                 {
-                    await _sessionManager.StopSessionAsync(device.AppiumSession);
+                    await _sessionManager.StopSessionAsync(device);
                 }
             }
         }
@@ -654,3 +677,4 @@ namespace AppiumBootstrapInstaller.Services
         }
     }
 }
+

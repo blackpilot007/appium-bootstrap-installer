@@ -1,6 +1,7 @@
 # ServiceSetup.ps1
-# Portable/non-admin setup for the Appium Bootstrap Agent on Windows.
-# Creates a Startup shortcut that runs the agent in listen mode via VBScript wrapper.
+# Optional: Creates a Windows Startup shortcut for the device listener agent.
+# The agent runs as part of AppiumBootstrapInstaller.exe with --listen flag.
+# This is OPTIONAL - you can also run the installer manually with --listen mode.
 
 param(
     [string]$InstallDir = (Resolve-Path "$PSScriptRoot\..\..\..").Path,
@@ -30,7 +31,7 @@ function Write-Success {
     Write-Log "================================================================" "INF"
 }
 
-Write-Log "Starting service manager setup on Windows"
+Write-Log "Starting optional startup configuration on Windows"
 Write-Log "Installation Directory: $InstallDir"
 Write-Log "System: $(Get-WmiObject Win32_OperatingSystem | Select-Object -ExpandProperty Caption)"
 Write-Log "User: $env:USERNAME"
@@ -57,15 +58,24 @@ function Stop-ExistingServices {
     }
 }
 
-# Setup Device Listener Agent (Non-Admin Mode)
-function Setup-DeviceListenerAgent {
+# Configure Device Listener for Startup (Optional)
+function Setup-DeviceListenerStartup {
     Write-Log "================================================================" "INF"
-    Write-Log "         SETTING UP DEVICE LISTENER AGENT (NON-ADMIN)            " "INF"
+    Write-Log "         CONFIGURING DEVICE LISTENER FOR AUTO-START             " "INF"
     Write-Log "================================================================" "INF"
     
     $serviceName = "AppiumBootstrapAgent"
     $exePath = "$InstallDir\AppiumBootstrapInstaller.exe"
     $configPath = "$InstallDir\config.json"
+    
+    # Check if config file exists before setting up auto-start
+    if (-not (Test-Path $configPath)) {
+        Write-Log "Config file not found at $configPath" "WARN"
+        Write-Log "Skipping auto-start setup. You can manually start the agent with:" "WARN"
+        Write-Log "  $exePath --listen --config <path-to-config>" "WARN"
+        Write-Success "AGENT SETUP (MANUAL START REQUIRED)"
+        return
+    }
     
     if (-not (Test-Path $exePath)) {
             Write-Log "Executable not found at $exePath, attempting to copy from ExeSource: $ExeSource" "WARN"
@@ -75,7 +85,8 @@ function Setup-DeviceListenerAgent {
                     Write-Log "Copied executable from $ExeSource to $exePath"
                 }
                 catch {
-                    Write-Log "ERROR: Could not copy executable from $ExeSource to $exePath: $_" "ERR"
+                    $errorMsg = $_.Exception.Message
+                    Write-Log "ERROR: Could not copy executable from $ExeSource to ${exePath}: $errorMsg" "ERR"
                     throw "AppiumBootstrapInstaller.exe not found and could not be copied"
                 }
             }
@@ -109,17 +120,17 @@ WshShell.Run """$exePath"" --listen --config ""$configPath""", 0, False
         Write-Log "Created startup shortcut at $shortcutPath"
         Write-Success "AGENT SETUP (STARTUP FOLDER)"
         
-        # Start the agent now
-        Write-Log "Starting agent now..."
-        Start-Process "wscript.exe" -ArgumentList "`"$vbsPath`"" -WindowStyle Hidden
-        Write-Log "Agent started successfully"
+        # Don't auto-start the agent during setup - it will start on next login
+        # or can be started manually
         Write-Log ""
-        Write-Log "Device monitoring is now active via AppiumBootstrapInstaller.exe"
-        Write-Log "The agent will automatically start on system login"
+        Write-Log "Device monitoring agent has been configured for auto-start"
+        Write-Log "The agent will start automatically on next system login"
         Write-Log ""
-        Write-Log "To manually start/stop the agent:"
-        Write-Log "  Start: wscript.exe `"$vbsPath`""
-        Write-Log "  Stop:  Stop the AppiumBootstrapInstaller process from Task Manager"
+        Write-Log "To manually start the agent now:"
+        Write-Log "  wscript.exe `"$vbsPath`""
+        Write-Log ""
+        Write-Log "To stop the agent:"
+        Write-Log "  Stop the AppiumBootstrapInstaller process from Task Manager"
         Write-Log ""
     }
     catch {
@@ -132,19 +143,19 @@ WshShell.Run """$exePath"" --listen --config ""$configPath""", 0, False
 # Main execution
 try {
     Write-Log "================================================================" "INF"
-    Write-Log "     STARTING SERVICE MANAGER SETUP ON WINDOWS                  " "INF"
+    Write-Log "     OPTIONAL: CONFIGURING AUTO-START FOR DEVICE LISTENER       " "INF"
     Write-Log "================================================================" "INF"
     
     Stop-ExistingServices
-    Setup-DeviceListenerAgent
+    Setup-DeviceListenerStartup
     
     Write-Log "================================================================" "INF"
-    Write-Log "           SERVICE MANAGER SETUP COMPLETED SUCCESSFULLY         " "INF"
+    Write-Log "           STARTUP CONFIGURATION COMPLETED SUCCESSFULLY         " "INF"
     Write-Log "================================================================" "INF"
     
     exit 0
 }
 catch {
-    Write-Log "Service manager setup failed with error: $_" "ERR"
+    Write-Log "Startup configuration failed with error: $_" "ERR"
     exit 1
 }

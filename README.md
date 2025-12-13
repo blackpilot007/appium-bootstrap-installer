@@ -12,9 +12,11 @@
 -  **Dynamic Configuration** – Install any Appium driver or plugin via JSON configuration
 -  **Automated Installation** – One-command setup of Node.js, Appium, drivers, and plugins
 -  **Smart Device Monitoring** – Auto-detects Android/iOS device connections with detailed info
+-  **Event-Driven Architecture** – Pub/sub event bus for device and session lifecycle events
 -  **Dual iOS Detection** – libimobiledevice (primary) with go-ios fallback
--  **Health Monitoring** – Automatic service health checks with restart on failure
--  **Dynamic Port Allocation** – Automatically finds and assigns consecutive ports
+-  **Health Monitoring** – Programmatic health checks with component status tracking
+-  **Centralized Port Management** – Dedicated port manager service with thread-safe allocation
+-  **Dependency Injection** – Full DI container with service interfaces for testability
 -  **Retry Logic** – Robust error handling with exponential backoff
 -  **Log Rotation** – Automatic log management (10 MB, keep 5 files)
 -  **Cross-Platform** – Native AOT support for Windows, macOS, and Linux
@@ -244,13 +246,15 @@ AppiumBootstrapInstaller --help
 
 ##  How It Works
 
-1. **Configuration Loading** – Reads JSON config with driver/plugin specifications
-2. **Installation** – Installs Node.js, Appium, and all enabled drivers/plugins
-3. **Portable Setup** – Prepares optional startup helpers (no admin/system services)
-4. **Device Monitoring** – Polls for device connections (configurable interval)
-5. **Port Allocation** – Dynamically finds available consecutive ports with retry logic
-6. **Session Management** – Auto-starts/stops Appium servers per device with exponential backoff
-7. **Health Monitoring** – Continuous service health checks with automatic recovery
+1. **Configuration Loading** – Validates and loads JSON config with driver/plugin specifications
+2. **Dependency Injection** – Builds DI container with all services (EventBus, PortManager, DeviceRegistry, etc.)
+3. **Installation** – Orchestrator manages Node.js, Appium, and all enabled drivers/plugins
+4. **Portable Setup** – Prepares optional startup helpers (no admin/system services)
+5. **Device Monitoring** – Polls for device connections and publishes events (DeviceConnected/Disconnected)
+6. **Port Allocation** – PortManager finds available consecutive ports with thread-safe allocation
+7. **Session Management** – Auto-starts/stops Appium servers per device, publishes session events
+8. **Event Propagation** – Event bus notifies subscribers of all device and session lifecycle changes
+9. **Health Monitoring** – HealthCheckService provides programmatic health status queries
 
 ### Management Features (Portable Process Mode)
 - **Health Monitoring**: Checks every 30 seconds, auto-restart on failure (in-process)
@@ -265,11 +269,13 @@ AppiumBootstrapInstaller --help
 - **Trust Detection**: Clear prompts for untrusted devices
 - **Device Details**: Logs UDID, model, iOS version, device name
 
-### Port Allocation Strategy
+### Port Allocation Strategy (PortManager Service)
 - **iOS**: 3 consecutive ports (Appium + WDA + MJPEG)
 - **Android**: 2 consecutive ports (Appium + SystemPort)
-- Automatically finds available 4-digit ports (1000-65535)
-- Thread-safe allocation with semaphore locking
+- **Range**: Configurable port range (default: 4723-5000)
+- **Thread-Safe**: Dedicated PortManager with SemaphoreSlim locking
+- **Availability Check**: TCP listener verification before allocation
+- **Extensible**: Plugins can request ports via IPortManager interface
 
 ### Retry Logic
 - **Session Start**: 3 attempts with exponential backoff (1s, 2s, 4s)
@@ -285,6 +291,10 @@ AppiumBootstrapInstaller --help
 
 ##  Architecture Highlights
 
+✅ **Service Interfaces** – Clean abstraction layer (IDeviceRegistry, IAppiumSessionManager, IPortManager, etc.)
+✅ **Event-Driven** – Pub/sub event bus for loose coupling and extensibility
+✅ **Dependency Injection** – Microsoft.Extensions.DependencyInjection with proper service lifetimes
+✅ **Orchestrator Pattern** – Centralized workflow management separate from main entry point
 ✅ **Native AOT Compilation** – Fast startup, low memory footprint
 ✅ **Zero Hardcoding** – All drivers/plugins configured via JSON
 ✅ **Robust Error Handling** – Specific exception types with retry strategies
