@@ -235,24 +235,24 @@ AppiumBootstrapInstaller --help
 
 ##  Platform Support
 
-| Platform | Service Manager | iOS Support | Android Support | Status |
-|----------|----------------|-------------|-----------------|--------|
-| Windows 10/11 | Servy | go-ios (fallback: libimobiledevice) | ADB |  Fully Supported |
-| macOS 10.15+ | Supervisor | Native (Xcode) | ADB |  Fully Supported |
-| Ubuntu/Debian | systemd | go-ios | ADB |  Fully Supported |
+| Platform | Management Mode (Default) | iOS Support | Android Support | Status |
+|----------|----------------------------|-------------|-----------------|--------|
+| Windows 10/11 | Portable process-mode (child processes) | go-ios (fallback: libimobiledevice) | ADB | Fully Supported |
+| macOS 10.15+ | Portable process-mode (child processes) | Native (Xcode) | ADB | Fully Supported |
+| Ubuntu/Debian | Portable process-mode (child processes) | go-ios | ADB | Fully Supported |
 
 ##  How It Works
 
 1. **Configuration Loading** – Reads JSON config with driver/plugin specifications
 2. **Installation** – Installs Node.js, Appium, and all enabled drivers/plugins
-3. **Service Setup** – Configures Servy/Supervisor/systemd for process management
+3. **Portable Setup** – Prepares optional startup helpers (no admin/system services)
 4. **Device Monitoring** – Polls for device connections (configurable interval)
 5. **Port Allocation** – Dynamically finds available consecutive ports with retry logic
 6. **Session Management** – Auto-starts/stops Appium servers per device with exponential backoff
 7. **Health Monitoring** – Continuous service health checks with automatic recovery
 
-### Service Management Features (Servy)
-- **Health Monitoring**: Checks every 30 seconds, auto-restart on failure
+### Management Features (Portable Process Mode)
+- **Health Monitoring**: Checks every 30 seconds, auto-restart on failure (in-process)
 - **Log Rotation**: 10 MB per file, keeps 5 rotated files
 - **Auto-Recovery**: Max 5 restart attempts on service failure
 - **No GUI Prompts**: Fully scriptable for CI/CD pipelines
@@ -295,9 +295,9 @@ AppiumBootstrapInstaller --help
 
 **Installation fails with permission errors:**
 ```bash
-# Windows: Run as Administrator
-# Linux/macOS: Check folder permissions
-sudo chown -R $USER:$USER /path/to/installFolder
+# Choose a user-writable install folder (portable mode)
+# Example:
+#   --install_folder="$HOME/appium-bootstrap"
 ```
 
 **Configuration not found:**
@@ -305,19 +305,13 @@ sudo chown -R $USER:$USER /path/to/installFolder
 AppiumBootstrapInstaller --config /full/path/to/config.json
 ```
 
-**Service management (Windows only):**
+**Agent (listen mode) management (Windows):**
 ```powershell
-# Check device listener service status
-servy-cli status --name="AppiumBootstrap_DeviceListener"
+# Run the agent in the foreground
+./AppiumBootstrapInstaller.exe --listen --config .\config.json
 
-# Restart device listener
-servy-cli restart --quiet --name="AppiumBootstrap_DeviceListener"
-
-# View service logs in real-time
-Get-Content logs\AppiumBootstrap_DeviceListener_stdout.log -Tail 50 -Wait
-
-# Check all Appium services
-servy-cli list | Select-String "AppiumBootstrap"
+# Tail logs
+Get-Content .\logs\installer-*.log -Tail 50 -Wait
 ```
 
 **Android devices not detected:**

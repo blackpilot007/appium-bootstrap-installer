@@ -40,7 +40,7 @@ The Appium Bootstrap Installer delivers on its promise to eliminate manual Appiu
 ### ✅ **Appium Session Management**
 - **Automatic Session Creation**: Appium server instances per connected device
 - **Intelligent Port Allocation**: Dynamic port assignment with conflict resolution
-- **Service Integration**: Windows (NSSM), Linux (systemd), macOS (Supervisor) integration
+- **Portable Process Mode**: Appium servers run as child processes (no admin/system services required)
 - **Session Lifecycle**: Automatic start/stop of Appium servers based on device events
 - **Process Management**: Robust process monitoring and cleanup
 
@@ -54,19 +54,17 @@ The Appium Bootstrap Installer delivers on its promise to eliminate manual Appiu
 ### ✅ **Platform-Specific Implementations**
 
 #### **Windows Support**
-- **NSSM Integration**: Non-Sucking Service Manager for Windows services
+- **Non-Admin Operation**: Designed to run without elevation and without GUI prompts
 - **PowerShell Scripts**: Comprehensive automation scripts for all operations
-- **Service Management**: Windows Service installation and management
-- **UAC Handling**: Administrator privilege escalation handling
+- **Startup Helpers**: Optional user-level startup integration (portable)
 
 #### **macOS Support**
-- **Supervisor Integration**: Process management with launchd compatibility
-- **Homebrew Integration**: Package management for dependencies
+- **Portable Process Mode**: No system service registration required by default
 - **ARM64 Support**: Native Apple Silicon and Intel compatibility
 - **Permission Management**: Proper file permissions and security
 
 #### **Linux Support**
-- **systemd Integration**: Native Linux service management
+- **Portable Process Mode**: No system service registration required by default
 - **Package Managers**: apt/yum/dnf support for system dependencies
 - **User Isolation**: Proper user/group permissions and sandboxing
 - **Network Configuration**: Firewall and network setup automation

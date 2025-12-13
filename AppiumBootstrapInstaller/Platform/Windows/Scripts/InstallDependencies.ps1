@@ -232,11 +232,18 @@ function Install-FNM {
         $releaseUrl = "https://api.github.com/repos/Schniz/fnm/releases/latest"
         $release = Invoke-RestMethod -Uri $releaseUrl -UseBasicParsing
         
-        # Find Windows x64 zip asset
-        $asset = $release.assets | Where-Object { $_.name -like "*windows-x64.zip" } | Select-Object -First 1
+        # Find a Windows asset (naming changed upstream: e.g. fnm-windows.zip)
+        $asset = $release.assets | Where-Object {
+            $_.name -like "*windows*.zip" -and $_.name -notlike "*arm*"
+        } | Select-Object -First 1
+
+        if (-not $asset) {
+            $asset = $release.assets | Where-Object { $_.name -eq "fnm-windows.zip" } | Select-Object -First 1
+        }
         
         if (-not $asset) {
-            throw "Could not find Windows x64 zip in latest fnm release"
+            $available = ($release.assets | Select-Object -ExpandProperty name) -join ", "
+            throw "Could not find a suitable Windows zip in latest fnm release. Available assets: $available"
         }
         
         $downloadUrl = $asset.browser_download_url
@@ -254,13 +261,20 @@ function Install-FNM {
         Write-Log "Extracting fnm to $fnmPath..."
         Expand-Archive -Path $fnmZipPath -DestinationPath $fnmPath -Force
         
-        # Verify fnm.exe exists
+        # Verify fnm.exe exists (some zips contain nested folders)
+        if (-not (Test-Path $fnmExe)) {
+            $found = Get-ChildItem -Path $fnmPath -Filter 'fnm.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) {
+                Copy-Item -Path $found.FullName -Destination $fnmExe -Force
+            }
+        }
+
         if (-not (Test-Path $fnmExe)) {
             throw "fnm.exe not found after extraction"
         }
         
         # Set environment variables for current session
-        $env:FNM_DIR = "$fnmPath\node-versions"
+        $env:FNM_DIR = $fnmPath
         $env:Path = "$fnmPath;$env:Path"
         
         # Clean up
@@ -294,8 +308,17 @@ function Install-NodeJS {
     }
     
     # Set fnm environment for this session
-    $env:FNM_DIR = "$fnmPath\node-versions"
+    $env:FNM_DIR = $fnmPath
     $env:Path = "$fnmPath;$env:Path"
+    
+    # Initialize fnm environment properly to avoid "We can't find the necessary environment variables" error
+    try {
+        $fnmEnv = & $fnmExe env --shell powershell
+        $fnmEnv | Invoke-Expression
+    }
+    catch {
+        Write-Log "Could not initialize fnm env: $_" "WARN"
+    }
     
     # Check if Node.js version is already installed
     $output = & $fnmExe list 2>&1 | Out-String

@@ -72,6 +72,14 @@ if [[ "${DEBUG:-0}" == "1" ]]; then
     set -x
 fi
 
+# Portable-first: skip supervisor/system service setup unless explicitly enabled
+if [[ "${ENABLE_SUPERVISOR:-0}" != "1" ]]; then
+    script_log "Skipping Supervisor setup (portable mode)."
+    script_log "Set ENABLE_SUPERVISOR=1 if you intentionally want local Supervisor configs."
+    script_log "Current install directory: $INSTALL_DIR"
+    exit 0
+fi
+
 # Architecture detection and Homebrew path setup
 ARCH="$(uname -m)"
 IS_ARM64=0

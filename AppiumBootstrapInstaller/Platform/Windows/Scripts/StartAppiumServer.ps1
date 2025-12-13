@@ -59,6 +59,17 @@ if (-not $nodeExe) {
                 $nodeExe = Join-Path $versioned.FullName "node.exe"
             }
         }
+        
+        # Check fnm directory
+        if (-not $nodeExe) {
+            $fnmDir = Join-Path $installFolder "fnm\node-versions"
+            if (Test-Path $fnmDir) {
+                $versioned = Get-ChildItem -Path $fnmDir -Directory -Filter "v*" | Sort-Object Name -Descending | Select-Object -First 1
+                if ($versioned) {
+                    $nodeExe = Join-Path $versioned.FullName "node.exe"
+                }
+            }
+        }
     }
 }
 

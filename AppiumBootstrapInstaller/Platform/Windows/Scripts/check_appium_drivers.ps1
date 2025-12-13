@@ -34,6 +34,18 @@ if (-not $nodeExe) {
             if (Test-Path $nodeCandidate) { $nodeExe = $nodeCandidate }
         }
     }
+    
+    # Try locating node under fnm
+    if (-not $nodeExe) {
+        $fnmDir = Join-Path $installFolder "fnm\node-versions"
+        if (Test-Path $fnmDir) {
+            $versioned = Get-ChildItem -Path $fnmDir -Directory -Filter "v*" | Sort-Object Name -Descending | Select-Object -First 1
+            if ($versioned) {
+                $nodeCandidate = Join-Path $versioned.FullName "node.exe"
+                if (Test-Path $nodeCandidate) { $nodeExe = $nodeCandidate }
+            }
+        }
+    }
 }
 
 $appiumCmd = Join-Path $AppiumHome "..\bin\appium.cmd"

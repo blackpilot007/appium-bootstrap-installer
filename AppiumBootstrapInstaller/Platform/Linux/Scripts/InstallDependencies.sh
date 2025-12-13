@@ -267,14 +267,40 @@ install_appium_drivers() {
     
     # Check if jq is available for JSON parsing
     if ! command_exists jq; then
-        log_warn "jq not found, installing..."
-        if command_exists apt-get; then
-            sudo apt-get update && sudo apt-get install -y jq
-        elif command_exists yum; then
-            sudo yum install -y jq
-        elif command_exists dnf; then
-            sudo dnf install -y jq
-        else
+        log_warn "jq not found. Attempting to install locally..."
+        
+        # Try to install via package manager if sudo is available (check if user is root or has sudo)
+        if [ "$(id -u)" -eq 0 ] || sudo -n true 2>/dev/null; then
+             if command_exists apt-get; then
+                sudo apt-get update && sudo apt-get install -y jq
+            elif command_exists yum; then
+                sudo yum install -y jq
+            elif command_exists dnf; then
+                sudo dnf install -y jq
+            fi
+        fi
+        
+        # If still not found, try local binary download
+        if ! command_exists jq; then
+             log_info "Downloading jq binary locally..."
+             mkdir -p "$INSTALL_FOLDER/bin"
+             # Detect arch
+             ARCH=$(uname -m)
+             JQ_URL=""
+             if [ "$ARCH" = "x86_64" ]; then
+                 JQ_URL="https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64"
+             elif [ "$ARCH" = "aarch64" ]; then
+                 JQ_URL="https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-arm64"
+             fi
+             
+             if [ -n "$JQ_URL" ]; then
+                 curl -L -o "$INSTALL_FOLDER/bin/jq" "$JQ_URL"
+                 chmod +x "$INSTALL_FOLDER/bin/jq"
+                 export PATH="$INSTALL_FOLDER/bin:$PATH"
+             fi
+        fi
+        
+        if ! command_exists jq; then
             log_error "Cannot install jq. Please install manually."
             return 1
         fi
@@ -376,14 +402,42 @@ install_appium_plugins() {
     
     # Check if jq is available for JSON parsing
     if ! command_exists jq; then
-        log_warn "jq not found, installing..."
-        if command_exists apt-get; then
-            sudo apt-get update && sudo apt-get install -y jq
-        elif command_exists yum; then
-            sudo yum install -y jq
-        elif command_exists dnf; then
-            sudo dnf install -y jq
-        else
+        log_warn "jq not found. Attempting to install locally..."
+
+        # Try package manager only if sudo is available (non-fatal if not)
+        if [ "$(id -u)" -eq 0 ] || sudo -n true 2>/dev/null; then
+            if command_exists apt-get; then
+                sudo apt-get update && sudo apt-get install -y jq || true
+            elif command_exists yum; then
+                sudo yum install -y jq || true
+            elif command_exists dnf; then
+                sudo dnf install -y jq || true
+            fi
+        fi
+
+        # Fallback: download a local jq binary into INSTALL_FOLDER/bin
+        if ! command_exists jq; then
+            log_info "Downloading jq binary locally..."
+            mkdir -p "$INSTALL_FOLDER/bin"
+            ARCH=$(uname -m)
+            JQ_URL=""
+            if [ "$ARCH" = "x86_64" ]; then
+                JQ_URL="https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64"
+            elif [ "$ARCH" = "aarch64" ]; then
+                JQ_URL="https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-arm64"
+            fi
+
+            if [ -n "$JQ_URL" ]; then
+                if curl -L -o "$INSTALL_FOLDER/bin/jq" "$JQ_URL"; then
+                    chmod +x "$INSTALL_FOLDER/bin/jq"
+                    export PATH="$INSTALL_FOLDER/bin:$PATH"
+                else
+                    log_warn "Failed to download jq from $JQ_URL"
+                fi
+            fi
+        fi
+
+        if ! command_exists jq; then
             log_error "Cannot install jq. Please install manually."
             return 1
         fi
@@ -705,52 +759,62 @@ install_libimobiledevice() {
     fi
     
     log_info "Installing libimobiledevice for iOS device support..."
-    
+
     # Check if already installed
     if command_exists ideviceinfo; then
-        local installed_version=$(ideviceinfo --version 2>&1 | head -n 1 | grep -oP '\d+\.\d+\.\d+' || echo "unknown")
+        local installed_version=$(ideviceinfo --version 2>&1 | head -n 1 | grep -oP '\\d+\.\\d+\.\\d+' || echo "unknown")
         log_info "libimobiledevice is already installed (version: $installed_version)"
         log_info "Ensuring it's up to date..."
     fi
-    
+
+    local has_sudo=0
+    if [ "$(id -u)" -eq 0 ] || sudo -n true 2>/dev/null; then
+        has_sudo=1
+    fi
+
+    if [ "$has_sudo" -eq 0 ]; then
+        log_warn "Skipping libimobiledevice install (no sudo/root). iOS real devices will not be available."
+        return 0
+    fi
+
     # Detect package manager and install/upgrade
     if command_exists apt-get; then
-        sudo apt-get update
+        sudo apt-get update || true
         if command_exists ideviceinfo; then
             # Already installed, upgrade if needed
             sudo apt-get install --only-upgrade -y libimobiledevice-utils usbmuxd 2>/dev/null || \
                 log_info "libimobiledevice is already at the latest version"
         else
             # Not installed, install it
-            sudo apt-get install -y libimobiledevice-utils usbmuxd
+            sudo apt-get install -y libimobiledevice-utils usbmuxd || true
         fi
     elif command_exists dnf; then
         if command_exists ideviceinfo; then
             sudo dnf upgrade -y libimobiledevice-utils 2>/dev/null || \
                 log_info "libimobiledevice is already at the latest version"
         else
-            sudo dnf install -y libimobiledevice-utils
+            sudo dnf install -y libimobiledevice-utils || true
         fi
     elif command_exists yum; then
         if command_exists ideviceinfo; then
             sudo yum update -y libimobiledevice-utils 2>/dev/null || \
                 log_info "libimobiledevice is already at the latest version"
         else
-            sudo yum install -y libimobiledevice-utils
+            sudo yum install -y libimobiledevice-utils || true
         fi
     elif command_exists pacman; then
         if command_exists ideviceinfo; then
             sudo pacman -Syu --noconfirm libimobiledevice usbmuxd 2>/dev/null || \
                 log_info "libimobiledevice is already at the latest version"
         else
-            sudo pacman -S --noconfirm libimobiledevice usbmuxd
+            sudo pacman -S --noconfirm libimobiledevice usbmuxd || true
         fi
     else
-        log_warn "Could not detect package manager. Please install libimobiledevice manually."
-        return 1
+        log_warn "Could not detect package manager. Please install libimobiledevice manually if needed."
+        return 0
     fi
-    
-    log_info "libimobiledevice installed successfully"
+
+    log_info "libimobiledevice installation step completed"
 }
 
 # Install Android SDK tools
@@ -766,20 +830,30 @@ install_android_tools() {
         log_info "ADB already installed: $(adb version | head -n 1)"
     else
         log_warn "ADB not found. Installing platform-tools..."
+
+        local has_sudo=0
+        if [ "$(id -u)" -eq 0 ] || sudo -n true 2>/dev/null; then
+            has_sudo=1
+        fi
+
+        if [ "$has_sudo" -eq 0 ]; then
+            log_warn "Cannot install Android platform-tools without sudo/root. Please install ADB manually."
+            return 0
+        fi
         
         # Detect package manager
         if command_exists apt-get; then
-            sudo apt-get update
-            sudo apt-get install -y android-tools-adb android-tools-fastboot
+            sudo apt-get update || true
+            sudo apt-get install -y android-tools-adb android-tools-fastboot || true
         elif command_exists dnf; then
-            sudo dnf install -y android-tools
+            sudo dnf install -y android-tools || true
         elif command_exists yum; then
-            sudo yum install -y android-tools
+            sudo yum install -y android-tools || true
         elif command_exists pacman; then
-            sudo pacman -S --noconfirm android-tools
+            sudo pacman -S --noconfirm android-tools || true
         else
             log_warn "Could not detect package manager. Please install ADB manually."
-            return 1
+            return 0
         fi
     fi
     

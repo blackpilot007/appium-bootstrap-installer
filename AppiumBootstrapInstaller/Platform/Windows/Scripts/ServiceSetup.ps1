@@ -1,5 +1,6 @@
 # ServiceSetup.ps1
-# Sets up Servy for managing Appium services on Windows
+# Portable/non-admin setup for the Appium Bootstrap Agent on Windows.
+# Creates a Startup shortcut that runs the agent in listen mode.
 # Equivalent to SupervisorSetup.sh for macOS
 
 param(
@@ -37,7 +38,7 @@ function Write-ErrorMessage {
     Write-Log "================================================================" "ERR"
 }
 
-# Note: Servy service installation typically requires admin privileges
+# Note: Windows Services require admin privileges; portable mode avoids services.
 # However, for user-directory installations, we can skip service setup
 # Users can manually set up services if needed with admin privileges later
 
@@ -170,29 +171,46 @@ Start-Sleep -Seconds 60
 # Setup Device Listener Service
 function Setup-DeviceListenerService {
     Write-Log "================================================================" "INF"
-    Write-Log "         SETTING UP DEVICE LISTENER SERVICE                      " "INF"
+    Write-Log "         SETTING UP DEVICE LISTENER AGENT (NON-ADMIN)            " "INF"
     Write-Log "================================================================" "INF"
     
-    # Check if running as administrator
-    $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-    $isAdmin = $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    $serviceName = "AppiumBootstrapAgent"
+    $exePath = "$InstallDir\AppiumBootstrapInstaller.exe"
+    $configPath = "$InstallDir\config.json"
     
-    if (-not $isAdmin) {
-        Write-Log "================================================================" "WARN"
-        Write-Log "    WINDOWS SERVICES REQUIRE ADMINISTRATOR PRIVILEGES           " "WARN"
-        Write-Log "================================================================" "WARN"
-        Write-Log "The device listener service cannot be installed without admin rights." "WARN"
-        Write-Log "Two options:" "WARN"
-        Write-Log "  1. Run this installer as Administrator (right-click -> Run as Administrator)" "WARN"
-        Write-Log "  2. Continue without service - you can manually start device monitoring later" "WARN"
-        Write-Log "" "WARN"
-        Write-Log "Skipping service installation (non-admin mode)" "WARN"
-        Write-Log "================================================================" "WARN"
-        return
+    # Create VBScript wrapper to run hidden
+    $vbsPath = "$InstallDir\AppiumAgent.vbs"
+    $vbsContent = @"
+Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run """$exePath"" --listen --config ""$configPath""", 0, False
+"@
+    Set-Content -Path $vbsPath -Value $vbsContent -Encoding ASCII
+    Write-Log "Created hidden startup wrapper at $vbsPath"
+    
+    # Create Startup Shortcut
+    $startupDir = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup"
+    $shortcutPath = "$startupDir\$serviceName.lnk"
+    
+    try {
+        $wshShell = New-Object -ComObject WScript.Shell
+        $shortcut = $wshShell.CreateShortcut($shortcutPath)
+        $shortcut.TargetPath = $vbsPath
+        $shortcut.WorkingDirectory = $InstallDir
+        $shortcut.Description = "Appium Bootstrap Agent"
+        $shortcut.Save()
+        
+        Write-Log "Created startup shortcut at $shortcutPath"
+        Write-Success "AGENT SETUP (STARTUP FOLDER)"
+        
+        # Offer to start it now
+        Write-Log "Starting agent now..."
+        Start-Process "wscript.exe" -ArgumentList "`"$vbsPath`""
     }
-    
-    $serviceName = "AppiumBootstrap_DeviceListener"
-    $deviceListenerScript = "$InstallDir\Platform\Windows\Scripts\DeviceListener.ps1"
+    catch {
+        Write-Log "Failed to create startup shortcut: $_" "ERR"
+        Write-Log "You can manually run the agent: $exePath --listen" "WARN"
+    }
+}
     
     # Find Servy CLI
     $servyCli = "C:\Program Files\Servy\servy-cli.exe"

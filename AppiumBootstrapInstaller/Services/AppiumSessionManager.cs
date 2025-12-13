@@ -24,7 +24,7 @@ using Microsoft.Extensions.Logging;
 namespace AppiumBootstrapInstaller.Services
 {
     /// <summary>
-    /// Manages Appium server instances for connected devices using NSSM (Windows) or Supervisord (Linux/macOS)
+    /// Manages Appium server instances for connected devices in portable process mode (child processes).
     /// </summary>
     public class AppiumSessionManager
     {
@@ -34,9 +34,10 @@ namespace AppiumBootstrapInstaller.Services
         private readonly HashSet<int> _usedPorts = new(); // Track all allocated ports
         private readonly SemaphoreSlim _portLock = new(1, 1);
         private readonly bool _isWindows;
-        private readonly string? _servyCliPath;
-        private readonly string? _supervisorctlPath;
         private readonly DeviceMetrics _metrics;
+        
+        // Track running processes by SessionId
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Process> _runningProcesses = new();
 
         public AppiumSessionManager(
             ILogger<AppiumSessionManager> logger,
@@ -49,43 +50,8 @@ namespace AppiumBootstrapInstaller.Services
             _portConfig = portConfig;
             _metrics = metrics;
             _isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
-
-            // Detect process manager
-            if (_isWindows)
-            {
-                // Check for Servy CLI in Program Files (default installation)
-                _servyCliPath = @"C:\Program Files\Servy\servy-cli.exe";
-                if (!File.Exists(_servyCliPath))
-                {
-                    // Fallback to local installation
-                    _servyCliPath = Path.Combine(installFolder, "servy", "servy-cli.exe");
-                    if (!File.Exists(_servyCliPath))
-                    {
-                        _logger.LogWarning("Servy CLI not found. Will use direct process execution.");
-                        _servyCliPath = null;
-                    }
-                    else
-                    {
-                        _logger.LogInformation("Using Servy CLI for process management: {Path}", _servyCliPath);
-                    }
-                }
-                else
-                {
-                    _logger.LogInformation("Using Servy CLI for process management: {Path}", _servyCliPath);
-                }
-            }
-            else
-            {
-                _supervisorctlPath = FindExecutable("supervisorctl");
-                if (_supervisorctlPath == null)
-                {
-                    _logger.LogWarning("supervisorctl not found. Will use direct process execution.");
-                }
-                else
-                {
-                    _logger.LogInformation("Using Supervisord for process management: {Path}", _supervisorctlPath);
-                }
-            }
+            
+            _logger.LogInformation("AppiumSessionManager initialized in Process Mode (Non-Admin)");
         }
 
         /// <summary>
@@ -159,9 +125,7 @@ namespace AppiumBootstrapInstaller.Services
                 var serviceName = $"AppiumBootstrap_{SanitizeServiceName(device.Id)}";
 
                 // Start Appium using process manager
-                var success = _isWindows
-                    ? await StartWithServyAsync(serviceName, device, appiumPort, wdaPort, mjpegPort, systemPort)
-                    : await StartWithSupervisordAsync(serviceName, device, appiumPort, wdaPort, mjpegPort, systemPort);
+                var success = await StartLocalProcessAsync(serviceName, device, appiumPort, wdaPort, mjpegPort, systemPort);
 
                 if (!success)
                 {
@@ -362,11 +326,11 @@ namespace AppiumBootstrapInstaller.Services
                     
                     if (_isWindows)
                     {
-                        await StopWithServyAsync(serviceName);
+                        await StopLocalProcessAsync(serviceName);
                     }
                     else
                     {
-                        await StopWithSupervisordAsync(serviceName);
+                        await StopLocalProcessAsync(serviceName);
                     }
 
                     // Release ports
@@ -421,7 +385,7 @@ namespace AppiumBootstrapInstaller.Services
                 session.SessionId);
         }
 
-        private async Task<bool> StartWithServyAsync(
+        private async Task<bool> StartLocalProcessAsync(
             string serviceName,
             Device device,
             int appiumPort,
@@ -429,136 +393,59 @@ namespace AppiumBootstrapInstaller.Services
             int? mjpegPort,
             int? systemPort)
         {
-            if (_servyCliPath == null)
-            {
-                _logger.LogWarning("Servy CLI not available, cannot start service");
-                return false;
-            }
-
             try
             {
-                var scriptPath = Path.Combine(_installFolder, "Platform", "Windows", "Scripts", "StartAppiumServer.ps1");
-                if (!File.Exists(scriptPath))
-                {
-                    _logger.LogError("Appium startup script not found: {ScriptPath}", scriptPath);
-                    return false;
-                }
+                string scriptPath;
+                string arguments;
+                string executable;
 
                 var appiumHome = _installFolder;
                 var appiumBin = Path.Combine(_installFolder, "bin");
-
-                // Get logs folder relative to executable (same location as Serilog installer logs)
+                
+                // Get logs folder relative to executable
                 var executableDir = AppDomain.CurrentDomain.BaseDirectory;
                 var logDir = Path.Combine(executableDir, "logs");
-                Directory.CreateDirectory(logDir); // Ensure it exists
+                Directory.CreateDirectory(logDir);
 
-                // Build PowerShell service command arguments
-                var psArguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{scriptPath}\" " +
+                if (_isWindows)
+                {
+                    scriptPath = Path.Combine(_installFolder, "Platform", "Windows", "Scripts", "StartAppiumServer.ps1");
+                    executable = "powershell.exe";
+                    arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{scriptPath}\" " +
                                 $"-AppiumHomePath \"{appiumHome}\" " +
                                 $"-AppiumBinPath \"{appiumBin}\" " +
                                 $"-AppiumPort {appiumPort} " +
                                 $"-WdaLocalPort {wdaPort ?? 0} " +
                                 $"-MpegLocalPort {mjpegPort ?? 0}";
-
-                // Build Servy install command with health monitoring and log rotation
-                var servyArgs = $"install --quiet " +
-                    $"--name=\"{serviceName}\" " +
-                    $"--displayName=\"Appium - {device.Name}\" " +
-                    $"--description=\"Appium server for device {device.Id}\" " +
-                    $"--path=\"powershell.exe\" " +
-                    $"--startupDir=\"{_installFolder}\" " +
-                    $"--params=\"{psArguments}\" " +
-                    $"--startupType=Automatic " +
-                    $"--priority=Normal " +
-                    $"--stdout=\"{logDir}\\{serviceName}_stdout.log\" " +
-                    $"--stderr=\"{logDir}\\{serviceName}_stderr.log\" " +
-                    $"--enableSizeRotation " +
-                    $"--rotationSize=10 " +
-                    $"--maxRotations=5 " +
-                    $"--enableHealth " +
-                    $"--heartbeatInterval=30 " +
-                    $"--maxFailedChecks=3 " +
-                    $"--recoveryAction=RestartProcess " +
-                    $"--maxRestartAttempts=5";
-
-                // Install service
-                _logger.LogDebug("Installing Servy service: {ServiceName}", serviceName);
-                var installResult = await RunCommandAsync(_servyCliPath, servyArgs);
-
-                if (installResult.ExitCode != 0)
-                {
-                    _logger.LogError("Failed to install Servy service: {Error}", installResult.Error);
-                    return false;
                 }
-
-                // Start service
-                _logger.LogDebug("Starting Servy service: {ServiceName}", serviceName);
-                var startResult = await RunCommandAsync(_servyCliPath, $"start --quiet --name=\"{serviceName}\"");
-
-                if (startResult.ExitCode != 0)
+                else
                 {
-                    _logger.LogError("Failed to start Servy service: {Error}", startResult.Error);
-                    await RunCommandAsync(_servyCliPath, $"uninstall --quiet --name=\"{serviceName}\"");
-                    return false;
+                    scriptPath = RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+                        ? Path.Combine(_installFolder, "Platform", "MacOS", "Scripts", "StartAppiumServer.sh")
+                        : Path.Combine(_installFolder, "Platform", "Linux", "Scripts", "StartAppiumServer.sh");
+                    
+                    executable = "/bin/bash";
+                    arguments = $"\"{scriptPath}\" \"{appiumHome}\" \"{appiumBin}\" {appiumPort} {wdaPort ?? 0} {mjpegPort ?? 0}";
+                    
+                    // Ensure script is executable (Unix only)
+                    if (!_isWindows && File.Exists(scriptPath))
+                    {
+                        try
+                        {
+#pragma warning disable CA1416 // Platform-specific API; guarded by !_isWindows
+                            File.SetUnixFileMode(
+                                scriptPath,
+                                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+                                UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+                                UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+#pragma warning restore CA1416
+                        }
+                        catch
+                        {
+                            // best-effort
+                        }
+                    }
                 }
-
-                // Wait a bit for service to initialize
-                await Task.Delay(2000);
-
-                _logger.LogInformation("Servy service {ServiceName} started successfully with health monitoring", serviceName);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error starting Servy service {ServiceName}", serviceName);
-                return false;
-            }
-        }
-
-        private async Task StopWithServyAsync(string serviceName)
-        {
-            if (_servyCliPath == null) return;
-
-            try
-            {
-                _logger.LogDebug("Stopping Servy service: {ServiceName}", serviceName);
-                await RunCommandAsync(_servyCliPath, $"stop --quiet --name=\"{serviceName}\"");
-                
-                await Task.Delay(1000);
-                
-                _logger.LogDebug("Uninstalling Servy service: {ServiceName}", serviceName);
-                await RunCommandAsync(_servyCliPath, $"uninstall --quiet --name=\"{serviceName}\"");
-                
-                _logger.LogInformation("Servy service {ServiceName} stopped and uninstalled", serviceName);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error stopping Servy service {ServiceName}", serviceName);
-            }
-        }
-
-        private async Task<bool> StartWithSupervisordAsync(
-            string serviceName,
-            Device device,
-            int appiumPort,
-            int? wdaPort,
-            int? mjpegPort,
-            int? systemPort)
-        {
-            if (_supervisorctlPath == null)
-            {
-                _logger.LogWarning("supervisorctl not available, cannot start service");
-                return false;
-            }
-
-            try
-            {
-                var configDir = Path.Combine(_installFolder, "services", "supervisor", "conf.d");
-                Directory.CreateDirectory(configDir);
-
-                var scriptPath = RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
-                    ? Path.Combine(_installFolder, "Platform", "MacOS", "Scripts", "StartAppiumServer.sh")
-                    : Path.Combine(_installFolder, "Platform", "Linux", "Scripts", "StartAppiumServer.sh");
 
                 if (!File.Exists(scriptPath))
                 {
@@ -566,109 +453,110 @@ namespace AppiumBootstrapInstaller.Services
                     return false;
                 }
 
-                var appiumHome = _installFolder;
-                var appiumBin = Path.Combine(_installFolder, "bin");
-                var logDir = Path.Combine(_installFolder, "services", "logs");
-                Directory.CreateDirectory(logDir);
-
-                // Create Supervisor config for this device
-                var configContent = $@"[program:{serviceName}]
-command=/bin/bash {scriptPath} {appiumHome} {appiumBin} {appiumPort} {wdaPort ?? 0} {mjpegPort ?? 0}
-directory={_installFolder}
-autostart=false
-autorestart=true
-startretries=3
-stderr_logfile={logDir}/{serviceName}_stderr.log
-stdout_logfile={logDir}/{serviceName}_stdout.log
-user={Environment.UserName}
-environment=HOME=""{Environment.GetEnvironmentVariable("HOME")}"",USER=""{Environment.UserName}""
-";
-
-                var configPath = Path.Combine(configDir, $"{serviceName}.conf");
-                await File.WriteAllTextAsync(configPath, configContent);
-
-                // Reload supervisor config
-                await RunCommandAsync(_supervisorctlPath, "reread");
-                await RunCommandAsync(_supervisorctlPath, "update");
-
-                // Start the program
-                _logger.LogDebug("Starting Supervisor program: {ServiceName}", serviceName);
-                var result = await RunCommandAsync(_supervisorctlPath, $"start {serviceName}");
-
-                if (result.ExitCode != 0)
+                var psi = new ProcessStartInfo
                 {
-                    _logger.LogError("Failed to start Supervisor program: {Error}", result.Error);
-                    return false;
+                    FileName = executable,
+                    Arguments = arguments,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    WorkingDirectory = _installFolder
+                };
+
+                // Set environment variables
+                psi.EnvironmentVariables["APPIUM_HOME"] = appiumHome;
+                
+                _logger.LogInformation("Starting Appium process for {DeviceName} on port {Port}", device.Name, appiumPort);
+                
+                var process = new Process { StartInfo = psi };
+                
+                // Redirect output to log files
+                var stdoutLog = Path.Combine(logDir, $"{serviceName}_stdout.log");
+                var stderrLog = Path.Combine(logDir, $"{serviceName}_stderr.log");
+                
+                process.OutputDataReceived += (sender, e) => 
+                {
+                    if (e.Data != null) File.AppendAllText(stdoutLog, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {e.Data}{Environment.NewLine}");
+                };
+                
+                process.ErrorDataReceived += (sender, e) => 
+                {
+                    if (e.Data != null) File.AppendAllText(stderrLog, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {e.Data}{Environment.NewLine}");
+                };
+
+                if (process.Start())
+                {
+                    process.BeginOutputReadLine();
+                    process.BeginErrorReadLine();
+                    
+                    _runningProcesses[serviceName] = process;
+                    
+                    // Monitor for early exit
+                    _ = Task.Run(async () => 
+                    {
+                        await Task.Delay(2000);
+                        if (process.HasExited)
+                        {
+                            _logger.LogError("Appium process exited early with code {Code}. Check logs at {LogPath}", process.ExitCode, stderrLog);
+                            _runningProcesses.TryRemove(serviceName, out _);
+                        }
+                    });
+                    
+                    return true;
                 }
-
-                await Task.Delay(2000);
-
-                _logger.LogInformation("Supervisor program {ServiceName} started successfully", serviceName);
-                return true;
+                
+                return false;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error starting Supervisor program {ServiceName}", serviceName);
+                _logger.LogError(ex, "Error starting Appium process {ServiceName}", serviceName);
                 return false;
             }
         }
 
-        private async Task StopWithSupervisordAsync(string serviceName)
+        private async Task StopLocalProcessAsync(string serviceName)
         {
-            if (_supervisorctlPath == null) return;
-
-            try
+            if (_runningProcesses.TryRemove(serviceName, out var process))
             {
-                _logger.LogDebug("Stopping Supervisor program: {ServiceName}", serviceName);
-                await RunCommandAsync(_supervisorctlPath, $"stop {serviceName}");
-                
-                await Task.Delay(500);
-                
-                await RunCommandAsync(_supervisorctlPath, $"remove {serviceName}");
-                
-                // Remove config file
-                var configPath = Path.Combine(_installFolder, "services", "supervisor", "conf.d", $"{serviceName}.conf");
-                if (File.Exists(configPath))
+                try
                 {
-                    File.Delete(configPath);
+                    _logger.LogInformation("Stopping Appium process {ServiceName} (PID: {Pid})", serviceName, process.Id);
+                    
+                    if (!process.HasExited)
+                    {
+                        process.Kill(true); // Kill entire process tree
+                        await process.WaitForExitAsync(new CancellationTokenSource(5000).Token);
+                    }
                 }
-                
-                await RunCommandAsync(_supervisorctlPath, "reread");
-                await RunCommandAsync(_supervisorctlPath, "update");
-                
-                _logger.LogInformation("Supervisor program {ServiceName} stopped and removed", serviceName);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error stopping Supervisor program {ServiceName}", serviceName);
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error stopping process {ServiceName}", serviceName);
+                }
+                finally
+                {
+                    process.Dispose();
+                }
             }
         }
 
         private async Task<int?> GetServiceProcessIdAsync(string serviceName)
         {
-            try
+            if (_runningProcesses.TryGetValue(serviceName, out var process))
             {
-                if (_isWindows && _servyCliPath != null)
+                try
                 {
-                    var result = await RunCommandAsync(_servyCliPath, $"status --name=\"{serviceName}\"");
-                    // Parse PID from Servy status output if available
-                    // For now, return null as Servy manages the process
-                    return null;
-                }
-                else if (_supervisorctlPath != null)
-                {
-                    var result = await RunCommandAsync(_supervisorctlPath, $"pid {serviceName}");
-                    if (int.TryParse(result.Output.Trim(), out var pid))
+                    if (!process.HasExited)
                     {
-                        return pid;
+                        return process.Id;
                     }
                 }
+                catch
+                {
+                    // Process might have exited
+                }
             }
-            catch
-            {
-                // Ignore errors
-            }
-            return null;
+            return await Task.FromResult<int?>(null);
         }
 
         private string SanitizeServiceName(string deviceId)
