@@ -52,7 +52,7 @@ cp config.sample.json config.json
     { "name": "uiautomator2", "version": "3.8.3", "enabled": true }
   ],
   "plugins": [
-    { "name": "device-farm", "version": "8.3.5", "enabled": true }
+    { "id": "device-farm", "version": "8.3.5", "enabled": true }
   ]
 }
 ```
@@ -98,12 +98,12 @@ chmod +x AppiumBootstrapInstaller
 ```json
 {
   "plugins": [
-    { "name": "device-farm", "version": "8.3.5", "enabled": true },
-    { "name": "appium-dashboard", "version": "2.0.3", "enabled": true },
-    { "name": "images", "version": "2.1.7", "enabled": false },
-    { "name": "relaxed-caps", "version": "2.0.0", "enabled": false },
-    { "name": "element-wait", "version": "3.0.2", "enabled": false },
-    { "name": "execute-driver", "version": "2.1.4", "enabled": false }
+    { "id": "device-farm", "version": "8.3.5", "enabled": true },
+    { "id": "appium-dashboard", "version": "2.0.3", "enabled": true },
+    { "id": "images", "version": "2.1.7", "enabled": false },
+    { "id": "relaxed-caps", "version": "2.0.0", "enabled": false },
+    { "id": "element-wait", "version": "3.0.2", "enabled": false },
+    { "id": "execute-driver", "version": "2.1.4", "enabled": false }
   ]
 }
 ```
@@ -187,7 +187,7 @@ AppiumBootstrapInstaller --help
     { "name": "uiautomator2", "version": "3.8.3", "enabled": true }
   ],
   "plugins": [
-    { "name": "device-farm", "version": "8.3.5", "enabled": true }
+    { "id": "device-farm", "version": "8.3.5", "enabled": true },
   ],
   "platformSpecific": {
     "windows": {
@@ -208,7 +208,7 @@ AppiumBootstrapInstaller --help
     { "name": "xcuitest", "version": "7.24.3", "enabled": true }
   ],
   "plugins": [
-    { "name": "appium-dashboard", "version": "2.0.3", "enabled": true }
+    { "id": "appium-dashboard", "version": "2.0.3", "enabled": true }
   ],
   "enableDeviceListener": true,
   "autoStartAppium": true
@@ -227,9 +227,9 @@ AppiumBootstrapInstaller --help
     { "name": "flutter", "version": "2.8.1", "enabled": true }
   ],
   "plugins": [
-    { "name": "device-farm", "version": "8.3.5", "enabled": true },
-    { "name": "appium-dashboard", "version": "2.0.3", "enabled": true },
-    { "name": "images", "version": "2.1.7", "enabled": true }
+    { "id": "device-farm", "version": "8.3.5", "enabled": true },
+    { "id": "appium-dashboard", "version": "2.0.3", "enabled": true },
+    { "id": "images", "version": "2.1.7", "enabled": true }
   ],
   "enableDeviceListener": true,
   "autoStartAppium": true

@@ -1,9 +1,71 @@
 {
+  "installFolder": "${USERPROFILE}/AppiumBootstrap3",
+  "nodeVersion": "22",
+  "appiumVersion": "3.0.0",
+  "nvmVersion": "0.40.1",
+  "cleanInstallFolder": false,
+
+  "drivers": [
+    { "name": "xcuitest", "version": "10.11.0", "enabled": true },
+    { "name": "uiautomator2", "version": "4.1.0", "enabled": true },
+    { "name": "espresso", "version": "3.0.0", "enabled": false },
+    { "name": "flutter", "version": "3.0.0", "enabled": false },
+    { "name": "safari", "version": "4.0.0", "enabled": false }
+  ],
+
+  "plugins": [
+    { "id": "images", "name": "images", "version": "3.0.5", "enabled": true, "restartPolicy": "OnFailure" },
+    { "id": "relaxed-caps", "name": "relaxed-caps", "version": "3.0.0", "enabled": true, "restartPolicy": "Never" },
+    { "id": "element-wait", "name": "element-wait", "version": "4.0.0", "enabled": false },
+    { "id": "execute-driver", "name": "execute-driver", "version": "3.0.0", "enabled": false },
+    {
+      "id": "device-provisioner",
+      "name": "device-provisioner",
+      "type": "script",
+      "runtime": "powershell",
+      "executable": "${INSTALL_FOLDER}\\Platform\\Windows\\Scripts\\provision-device.ps1",
+      "arguments": ["-DeviceId", "{deviceId}"],
+      "enabled": false,
+      "triggerOn": "device-connected",
+      "stopOnDisconnect": true,
+      "restartPolicy": "OnFailure",
+      "healthCheckCommand": "${INSTALL_FOLDER}\\Platform\\Windows\\Scripts\\provision-device.ps1",
+      "healthCheckArguments": ["-DeviceId", "{deviceId}"],
+      "healthCheckTimeoutSeconds": 5
+    },
+    {
+      "id": "startup-check",
+      "name": "startup-check",
+      "type": "script",
+      "runtime": "bash",
+      "executable": "${INSTALL_FOLDER}/Platform/Linux/Scripts/check_startup.sh",
+      "arguments": [],
+      "enabled": false
+    }
+  ],
+
+  "pluginMonitorIntervalSeconds": 10,
+  "pluginRestartBackoffSeconds": 5,
+  "healthCheckTimeoutSeconds": 5,
+
+  "enableDeviceListener": true,
+  "deviceListenerPollInterval": 5,
+  "autoStartAppium": true,
+  "prebuiltWdaPath": "",
+  "deviceRegistry": { "enabled": true, "filePath": "device-registry.json", "autoSave": true, "saveIntervalSeconds": 30 },
+
+  "platformSpecific": {
+    "macOS": { "libimobiledeviceVersion": "latest" },
+    "windows": { "installIOSSupport": true, "installAndroidSupport": true, "nvmVersion": "1.1.12" },
+    "linux": { "installIOSSupport": true, "installAndroidSupport": true }
+  }
+}
     "installFolder": "${USERPROFILE}/AppiumBootstrap3",
     "nodeVersion": "22",
     "appiumVersion": "3.0.0",
     "nvmVersion": "0.40.1",
     "cleanInstallFolder": false,
+
     "drivers": [
         {
             "name": "xcuitest",
@@ -33,39 +95,115 @@
             "name": "safari",
             "version": "4.0.0",
             "enabled": false,
-            "_comment": "Safari driver for iOS web testing"
-        },
-        {
-            "name": "gecko",
-            "version": "1.0.0",
-            "enabled": false,
-            "_comment": "Gecko driver for Firefox testing on Android"
+            "_comment": "Safari/WebKit driver for macOS/iOS"
         }
     ],
+
     "plugins": [
         {
+            "id": "images",
             "name": "images",
             "version": "3.0.5",
             "enabled": true,
-            "_comment": "Image comparison plugin for visual testing (Appium 3 official plugin)"
+            "_comment": "Image comparison plugin for visual testing (Appium 3 official plugin)",
+            "restartPolicy": "OnFailure"
         },
         {
+            "id": "relaxed-caps",
             "name": "relaxed-caps",
             "version": "3.0.0",
             "enabled": true,
-            "_comment": "Relaxed capabilities plugin (Appium 3 official plugin)"
+            "_comment": "Relaxed capabilities plugin (Appium 3 official plugin)",
+            "restartPolicy": "Never"
         },
         {
+            "id": "element-wait",
             "name": "element-wait",
             "version": "4.0.0",
             "enabled": false,
             "_comment": "Element wait plugin for improved element waiting strategies"
         },
         {
+            "id": "execute-driver",
             "name": "execute-driver",
             "version": "3.0.0",
             "enabled": false,
             "_comment": "Execute driver plugin for running custom driver commands"
+        },
+        {
+            "id": "device-provisioner",
+            "name": "device-provisioner",
+            "type": "script",
+            "runtime": "powershell",
+            "executable": "${INSTALL_FOLDER}\\Platform\\Windows\\Scripts\\provision-device.ps1",
+            "arguments": ["-DeviceId", "{deviceId}"],
+            "enabled": false,
+            "_comment": "Example script plugin that provisions devices on connect (Windows PowerShell)",
+            "triggerOn": "device-connected",
+            "stopOnDisconnect": true,
+            "restartPolicy": "OnFailure",
+            "healthCheckCommand": "${INSTALL_FOLDER}\\Platform\\Windows\\Scripts\\provision-device.ps1",
+            "healthCheckArguments": ["-DeviceId", "{deviceId}"],
+            "healthCheckTimeoutSeconds": 5
+        },
+        {
+            "id": "startup-check",
+            "name": "startup-check",
+            "type": "script",
+            "runtime": "bash",
+            "executable": "${INSTALL_FOLDER}/Platform/Linux/Scripts/check_startup.sh",
+            "arguments": [],
+            "enabled": false,
+            "_comment": "Example cross-platform script plugin (bash)"
+        }
+    ],
+
+    "pluginMonitorIntervalSeconds": 10,
+    "pluginRestartBackoffSeconds": 5,
+    "healthCheckTimeoutSeconds": 5,
+
+    "enableDeviceListener": true,
+    "deviceListenerPollInterval": 5,
+    "autoStartAppium": true,
+    "prebuiltWdaPath": "",
+    "deviceRegistry": {
+        "enabled": true,
+        "filePath": "device-registry.json",
+        "autoSave": true,
+        "saveIntervalSeconds": 30
+    },
+    "platformSpecific": {
+        "macOS": {
+            "libimobiledeviceVersion": "latest"
+        },
+        "windows": {
+            "installIOSSupport": true,
+            "_comment_installIOSSupport": "Optional: Auto-enabled when xcuitest/safari/mac2 drivers detected. Set true to force install libimobiledevice/iTunes drivers",
+            "installAndroidSupport": true,
+            "nvmVersion": "1.1.12"
+        },
+        "linux": {
+            "installIOSSupport": true,
+            "_comment_installIOSSupport": "Optional: Auto-enabled when xcuitest/safari/mac2 drivers detected. Set true to force install libimobiledevice/go-ios",
+            "installAndroidSupport": true
+        }
+    }
+}
+            "runtime": "powershell",
+            "executable": "${INSTALL_FOLDER}\\Platform\\Windows\\Scripts\\provision-device.ps1",
+            "arguments": ["-DeviceId", "{deviceId}"],
+            "enabled": false,
+            "_comment": "Example script plugin that provisions devices on connect (Windows PowerShell)"
+        },
+        {
+            "id": "startup-check",
+            "name": "startup-check",
+            "type": "script",
+            "runtime": "bash",
+            "executable": "${INSTALL_FOLDER}/Platform/Linux/Scripts/check_startup.sh",
+            "arguments": [],
+            "enabled": false,
+            "_comment": "Example cross-platform script plugin (bash)"
         }
     ],
     "enableDeviceListener": true,

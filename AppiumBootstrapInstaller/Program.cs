@@ -24,6 +24,7 @@ using Microsoft.Extensions.Logging;
 using Serilog;
 using Serilog.Events;
 using Serilog.Sinks.SystemConsole.Themes;
+using System.Text.Json;
 
 namespace AppiumBootstrapInstaller
 {
@@ -91,12 +92,112 @@ namespace AppiumBootstrapInstaller
                 logger.LogInformation("  Drivers: {DriversCount} enabled", config.Drivers.Count(d => d.Enabled));
                 logger.LogInformation("  Plugins: {PluginsCount} enabled", config.Plugins.Count(p => p.Enabled));
 
-                // Validate configuration
+                // Validate configuration (collect errors + warnings)
                 var validator = serviceProvider.GetRequiredService<ConfigurationValidator>();
-                if (!validator.Validate(config, out var errors))
+                List<string> errors;
+                List<string> warnings;
+                if (!validator.Validate(config, out errors, out warnings))
                 {
                     logger.LogError("Configuration validation failed. Please fix the errors and try again.");
+
+                    if (warnings != null && warnings.Any())
+                    {
+                        Console.WriteLine();
+                        Console.WriteLine("Configuration warnings:");
+                        foreach (var w in warnings)
+                        {
+                            Console.WriteLine("  - {0}", w);
+                        }
+                        Console.WriteLine();
+                    }
+
                     return 1;
+                }
+
+                // Print warnings to the caller (stdout) so external callers can observe them.
+                // Support machine-readable JSON output for CI via --warnings-json or --warnings-file / WARNINGS_FILE env var.
+                if (warnings != null && warnings.Any())
+                {
+                    // Always print human-readable warnings for interactive use
+                    Console.WriteLine();
+                    Console.WriteLine("Configuration warnings:");
+                    foreach (var w in warnings)
+                    {
+                        Console.WriteLine("  - {0}", w);
+                    }
+                    Console.WriteLine();
+
+                    // Prepare JSON payload
+                    var payload = new
+                    {
+                        TimestampUtc = DateTime.UtcNow,
+                        ConfigPath = options.ConfigPath,
+                        Warnings = warnings
+                    };
+
+                    var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
+                    string json = JsonSerializer.Serialize(payload, jsonOptions);
+
+                    // If --warnings-json flag is set or WARNINGS_JSON env var is truthy, print JSON to stdout.
+                    var envWarningsJson = Environment.GetEnvironmentVariable("WARNINGS_JSON");
+                    if (options.WarningsJson || (!string.IsNullOrWhiteSpace(envWarningsJson) && (
+                        envWarningsJson == "1" || envWarningsJson.Equals("true", StringComparison.OrdinalIgnoreCase))))
+                    {
+                        Console.WriteLine(json);
+                    }
+
+                    // If --warnings-file provided or WARNINGS_FILE env var set, write JSON to file for CI.
+                    var warningsFilePath = options.WarningsFile ?? Environment.GetEnvironmentVariable("WARNINGS_FILE");
+                    if (!string.IsNullOrWhiteSpace(warningsFilePath))
+                    {
+                        try
+                        {
+                            File.WriteAllText(warningsFilePath, json);
+                            logger.LogInformation("Wrote configuration warnings JSON to {Path}", warningsFilePath);
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.LogWarning(ex, "Failed to write warnings JSON to {Path}", warningsFilePath);
+                        }
+                    }
+                }
+
+                // Populate plugin registry from configuration (register simple ProcessPlugins for now)
+                try
+                {
+                    var pluginRegistry = serviceProvider.GetRequiredService<AppiumBootstrapInstaller.Plugins.PluginRegistry>();
+
+                    // Register definitions (blueprints) from configuration. Runtime instances will be created per-device by the orchestrator.
+                    foreach (var p in config.Plugins)
+                    {
+                        var id = p.Id;
+                        if (string.IsNullOrWhiteSpace(id))
+                        {
+                            logger.LogWarning("Skipping plugin with empty id in configuration");
+                            continue;
+                        }
+
+                        pluginRegistry.RegisterDefinition(id, p);
+                        logger.LogDebug("Registered plugin definition {PluginId} (type={Type}, enabled={Enabled})", id, p.Type ?? "process", p.Enabled);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Failed to populate plugin registry from configuration");
+                }
+
+                // Instantiate DeviceEventTrigger so it subscribes to event bus
+                try
+                {
+                    var deviceTrigger = serviceProvider.GetService<AppiumBootstrapInstaller.Plugins.Triggers.DeviceEventTrigger>();
+                    if (deviceTrigger != null)
+                    {
+                        logger.LogDebug("DeviceEventTrigger initialized");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Failed to initialize DeviceEventTrigger");
                 }
 
                 // Get orchestrator and run
@@ -176,6 +277,14 @@ namespace AppiumBootstrapInstaller
                 sp.GetRequiredService<Func<string, ScriptExecutor>>(),
                 platformScriptsPath));
 
+            // Plugin subsystem
+            services.AddSingleton<AppiumBootstrapInstaller.Plugins.PluginRegistry>();
+            services.AddSingleton<AppiumBootstrapInstaller.Plugins.PluginOrchestrator>();
+            // Service definition generator (writes systemd/supervisor templates)
+            services.AddSingleton<AppiumBootstrapInstaller.Plugins.ServiceDefinitionGenerator>();
+            // Device event trigger listens for device connect/disconnect and starts plugins
+            services.AddSingleton<AppiumBootstrapInstaller.Plugins.Triggers.DeviceEventTrigger>();
+
             return config;
         }
 
@@ -224,6 +333,21 @@ namespace AppiumBootstrapInstaller
                     case "--listen":
                     case "-l":
                         options.ListenMode = true;
+                        break;
+
+                    case "--warnings-json":
+                        options.WarningsJson = true;
+                        break;
+
+                    case "--warnings-file":
+                        if (i + 1 < args.Length)
+                        {
+                            options.WarningsFile = args[++i];
+                        }
+                        else
+                        {
+                            throw new ArgumentException("--warnings-file requires a file path");
+                        }
                         break;
 
                     default:

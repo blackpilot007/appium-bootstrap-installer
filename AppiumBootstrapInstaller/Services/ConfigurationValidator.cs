@@ -31,9 +31,10 @@ namespace AppiumBootstrapInstaller.Services
             _logger = logger;
         }
 
-        public bool Validate(InstallConfig config, out List<string> errors)
+        public bool Validate(InstallConfig config, out List<string> errors, out List<string> warnings)
         {
             errors = new List<string>();
+            warnings = new List<string>();
 
             // Required fields
             if (string.IsNullOrWhiteSpace(config.InstallFolder))
@@ -52,6 +53,15 @@ namespace AppiumBootstrapInstaller.Services
             if (config.DeviceRegistry.SaveIntervalSeconds < 1)
                 errors.Add("DeviceRegistry.SaveIntervalSeconds must be >= 1 second");
 
+            if (config.PluginMonitorIntervalSeconds < 1)
+                errors.Add("PluginMonitorIntervalSeconds must be >= 1 second");
+
+            if (config.PluginRestartBackoffSeconds < 0)
+                errors.Add("PluginRestartBackoffSeconds must be >= 0 seconds");
+
+            if (config.HealthCheckTimeoutSeconds < 1)
+                errors.Add("healthCheckTimeoutSeconds must be >= 1 second");
+
             // Driver validation
             foreach (var driver in config.Drivers.Where(d => d.Enabled))
             {
@@ -62,14 +72,26 @@ namespace AppiumBootstrapInstaller.Services
                     errors.Add($"Driver '{driver.Name}' has no version specified");
             }
 
-            // Plugin validation
+            // Plugin validation (require 'id' as canonical identifier)
             foreach (var plugin in config.Plugins.Where(p => p.Enabled))
             {
-                if (string.IsNullOrWhiteSpace(plugin.Name))
-                    errors.Add($"Plugin at index {config.Plugins.IndexOf(plugin)} has no name");
+                if (string.IsNullOrWhiteSpace(plugin.Id))
+                    errors.Add($"Plugin at index {config.Plugins.IndexOf(plugin)} has no 'id' field");
 
                 if (string.IsNullOrWhiteSpace(plugin.Version))
-                    errors.Add($"Plugin '{plugin.Name}' has no version specified");
+                    errors.Add($"Plugin '{plugin.Id ?? "<unknown>"}' has no version specified");
+
+                if (plugin.HealthCheckTimeoutSeconds.HasValue && plugin.HealthCheckTimeoutSeconds.Value < 1)
+                    errors.Add($"Plugin '{plugin.Id ?? "<unknown>"}' has invalid healthCheckTimeoutSeconds (must be >= 1)");
+
+                if (plugin.HealthCheckIntervalSeconds.HasValue && plugin.HealthCheckIntervalSeconds.Value < 1)
+                    errors.Add($"Plugin '{plugin.Id ?? "<unknown>"}' has invalid healthCheckIntervalSeconds (must be >= 1)");
+
+                // Warn if a health-check command is provided but no timeout is set (defensive recommendation)
+                if (!string.IsNullOrWhiteSpace(plugin.HealthCheckCommand) && !plugin.HealthCheckTimeoutSeconds.HasValue)
+                {
+                    _logger.LogWarning("Plugin '{PluginId}' defines a healthCheckCommand but no healthCheckTimeoutSeconds. A global default ({GlobalTimeout}s) will be used if configured.", plugin.Id, config.HealthCheckTimeoutSeconds);
+                }
             }
 
             if (errors.Any())
@@ -80,6 +102,15 @@ namespace AppiumBootstrapInstaller.Services
                     _logger.LogError("  - {Error}", error);
                 }
                 return false;
+            }
+
+            if (warnings.Any())
+            {
+                _logger.LogWarning("Configuration validation returned {WarningCount} warning(s):", warnings.Count);
+                foreach (var w in warnings)
+                {
+                    _logger.LogWarning("  - {Warning}", w);
+                }
             }
 
             _logger.LogInformation("Configuration validation passed");

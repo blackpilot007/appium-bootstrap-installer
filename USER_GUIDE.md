@@ -74,12 +74,12 @@ For complete control, specify all options:
   ],
   "plugins": [
     {
-      "name": "device-farm",
+      "id": "device-farm",
       "version": "8.3.5",
       "enabled": true
     },
     {
-      "name": "appium-dashboard",
+      "id": "appium-dashboard",
       "version": "2.0.3",
       "enabled": false
     }
@@ -254,12 +254,12 @@ Run:
   ],
   "plugins": [
     {
-      "name": "device-farm",
+      "id": "device-farm",
       "version": "8.3.5",
       "enabled": true
     },
     {
-      "name": "appium-dashboard",
+      "id": "appium-dashboard",
       "version": "2.0.3",
       "enabled": true
     }

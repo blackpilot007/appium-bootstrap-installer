@@ -68,6 +68,15 @@ namespace AppiumBootstrapInstaller.Models
         [JsonPropertyName("platformSpecific")]
         public PlatformSpecificConfig? PlatformSpecific { get; set; }
 
+        [JsonPropertyName("pluginMonitorIntervalSeconds")]
+        public int PluginMonitorIntervalSeconds { get; set; } = 10;
+
+        [JsonPropertyName("pluginRestartBackoffSeconds")]
+        public int PluginRestartBackoffSeconds { get; set; } = 5;
+
+        [JsonPropertyName("healthCheckTimeoutSeconds")]
+        public int HealthCheckTimeoutSeconds { get; set; } = 5;
+
         /// <summary>
         /// Validates the configuration and returns any validation errors
         /// </summary>
@@ -95,6 +104,26 @@ namespace AppiumBootstrapInstaller.Models
                 errors.Add("NvmVersion is required");
             }
 
+            // Validate plugins: require an id for each plugin and check for duplicates
+            if (Plugins != null && Plugins.Any())
+            {
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < Plugins.Count; i++)
+                {
+                    var p = Plugins[i];
+                    if (string.IsNullOrWhiteSpace(p?.Id))
+                    {
+                        errors.Add($"Plugin at index {i} must have an 'id' or 'name'.");
+                        continue;
+                    }
+
+                    if (!seen.Add(p.Id!))
+                    {
+                        errors.Add($"Duplicate plugin id detected: '{p.Id}'");
+                    }
+                }
+            }
+
             return errors;
         }
     }
@@ -120,13 +149,65 @@ namespace AppiumBootstrapInstaller.Models
     public class PluginConfig
     {
         [JsonPropertyName("name")]
-        public string Name { get; set; } = string.Empty;
+        public string? Name { get; set; }
 
         [JsonPropertyName("version")]
         public string Version { get; set; } = string.Empty;
 
         [JsonPropertyName("enabled")]
         public bool Enabled { get; set; } = true;
+        
+        [JsonPropertyName("id")]
+        public string? Id { get; set; }
+
+        [JsonPropertyName("type")]
+        public string? Type { get; set; }
+
+        [JsonPropertyName("executable")]
+        public string? Executable { get; set; }
+
+        [JsonPropertyName("arguments")]
+        public List<string>? Arguments { get; set; }
+
+        [JsonPropertyName("workingDirectory")]
+        public string? WorkingDirectory { get; set; }
+
+        [JsonPropertyName("environmentVariables")]
+        public Dictionary<string, string>? EnvironmentVariables { get; set; }
+
+        [JsonPropertyName("restartPolicy")]
+        public RestartPolicy RestartPolicy { get; set; } = RestartPolicy.OnFailure;
+
+        [JsonPropertyName("runtime")]
+        public string? Runtime { get; set; }
+        
+        [JsonPropertyName("triggerOn")]
+        public string? TriggerOn { get; set; }
+
+        [JsonPropertyName("stopOnDisconnect")]
+        public bool StopOnDisconnect { get; set; } = false;
+
+        [JsonPropertyName("healthCheckCommand")]
+        public string? HealthCheckCommand { get; set; }
+
+        [JsonPropertyName("healthCheckArguments")]
+        public List<string>? HealthCheckArguments { get; set; }
+
+        [JsonPropertyName("healthCheckIntervalSeconds")]
+        public int? HealthCheckIntervalSeconds { get; set; }
+
+        [JsonPropertyName("healthCheckRuntime")]
+        public string? HealthCheckRuntime { get; set; }
+
+        [JsonPropertyName("healthCheckTimeoutSeconds")]
+        public int? HealthCheckTimeoutSeconds { get; set; }
+    }
+
+    public enum RestartPolicy
+    {
+        Never,
+        OnFailure,
+        Always
     }
 
     /// <summary>

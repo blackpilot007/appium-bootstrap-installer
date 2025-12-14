@@ -101,6 +101,40 @@ namespace AppiumBootstrapInstaller.Services
                 _logger.LogWarning("  STEP 1/2 COMPLETED: Dependencies Installed Successfully");
                 _logger.LogWarning("==========================================");
 
+                // Start any configured plugins (optional plugin system)
+                try
+                {
+                    var pluginOrchestrator = _serviceProvider.GetService<AppiumBootstrapInstaller.Plugins.PluginOrchestrator>();
+                    var pluginRegistry = _serviceProvider.GetService<AppiumBootstrapInstaller.Plugins.PluginRegistry>();
+                    if (pluginOrchestrator != null && pluginRegistry != null && pluginRegistry.GetDefinitions().Any())
+                    {
+                        var ctx = new AppiumBootstrapInstaller.Plugins.PluginContext
+                        {
+                            InstallFolder = _config.InstallFolder,
+                            Services = _serviceProvider,
+                            Logger = _serviceProvider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<AppiumBootstrapInstaller.Plugins.PluginOrchestrator>>()
+                        };
+
+                        await pluginOrchestrator.StartEnabledPluginsAsync(ctx, cancellationToken);
+                            // Start background plugin health monitor
+                            try
+                            {
+                                // Use configured monitor interval and backoff from InstallConfig
+                                int monitorInterval = _config.PluginMonitorIntervalSeconds;
+                                int restartBackoff = _config.PluginRestartBackoffSeconds;
+                                pluginOrchestrator.StartMonitoring(ctx, monitorInterval, restartBackoff, cancellationToken);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Failed to start plugin health monitor");
+                            }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Plugin orchestrator failed to start configured plugins");
+                }
+
                 // If device listener is enabled, start it inline and skip service setup
                 if (_config.EnableDeviceListener)
                 {
@@ -404,5 +438,9 @@ namespace AppiumBootstrapInstaller.Services
         public bool DryRun { get; set; }
         public bool GenerateSampleConfig { get; set; }
         public bool ListenMode { get; set; }
+        // If set, prints warnings as JSON to stdout
+        public bool WarningsJson { get; set; }
+        // Optional path to write warnings JSON for CI consumption
+        public string? WarningsFile { get; set; }
     }
 }

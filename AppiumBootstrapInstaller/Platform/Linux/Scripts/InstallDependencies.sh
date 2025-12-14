@@ -466,7 +466,7 @@ install_appium_plugins() {
     # Install each plugin
     local index=0
     while [ $index -lt $plugin_count ]; do
-        local plugin_name=$(echo "$plugins_json" | jq -r ".[$index].name")
+        local plugin_name=$(echo "$plugins_json" | jq -r ".[$index].id")
         local plugin_version=$(echo "$plugins_json" | jq -r ".[$index].version")
         
         log_info "Installing plugin: ${plugin_name}@${plugin_version}"

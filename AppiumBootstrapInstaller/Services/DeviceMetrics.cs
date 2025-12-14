@@ -127,5 +127,19 @@ namespace AppiumBootstrapInstaller.Services
                        $"Port Failures: {PortAllocationFailuresTotal}";
             }
         }
+
+        // Plugin metrics
+        private int _pluginUnhealthyTotal = 0;
+        private int _pluginRestartsTotal = 0;
+
+        public void RecordPluginUnhealthy(string pluginId)
+        {
+            Interlocked.Increment(ref _pluginUnhealthyTotal);
+        }
+
+        public void RecordPluginRestart(string pluginId)
+        {
+            Interlocked.Increment(ref _pluginRestartsTotal);
+        }
     }
 }

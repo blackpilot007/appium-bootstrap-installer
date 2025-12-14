@@ -37,6 +37,9 @@ namespace AppiumBootstrapInstaller.Services.Interfaces
         void RecordSessionFailed(DevicePlatform platform, string reason);
         void RecordPortAllocationFailure();
         
+            // Plugin metrics
+            void RecordPluginUnhealthy(string pluginId);
+            void RecordPluginRestart(string pluginId);
         string GetSummary();
     }
 }
