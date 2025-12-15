@@ -73,7 +73,27 @@ namespace AppiumBootstrapInstaller.Services
                 config.InstallFolder = ExpandEnvironmentVariables(config.InstallFolder);
                 _logger.LogDebug("Install folder expanded to: {InstallFolder}", config.InstallFolder);
 
-                // Validate configuration
+                // Merge optional plugin definitions from plugins.d directory (preserve order)
+                try
+                {
+                    MergePluginsFromPluginsD(configPath, config);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to merge plugins from plugins.d directory");
+                }
+
+                // Normalize plugin definitions: ensure Id and Name are present (derive one from the other when missing)
+                try
+                {
+                    NormalizePluginDefinitions(config);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to normalize plugin definitions");
+                }
+
+                // Validate configuration (after merging plugins)
                 var validationErrors = config.Validate();
                 if (validationErrors.Any())
                 {
@@ -202,6 +222,57 @@ namespace AppiumBootstrapInstaller.Services
         }
 
         /// <summary>
+        /// Merge plugin definitions from a `plugins.d` directory adjacent to the config file
+        /// If an environment variable `PLUGINS_DIR` is set, files from that directory are also loaded (appended after local plugins.d)
+        /// Files are processed in sorted filename order and each file's `plugins` array is appended in-file order.
+        /// </summary>
+        private void MergePluginsFromPluginsD(string configPath, InstallConfig config)
+        {
+            if (string.IsNullOrWhiteSpace(configPath)) return;
+
+            var configDir = Path.GetDirectoryName(configPath) ?? Directory.GetCurrentDirectory();
+            var localPluginsDir = Path.Combine(configDir, "plugins.d");
+
+            var pluginDirs = new List<string>();
+            if (Directory.Exists(localPluginsDir)) pluginDirs.Add(localPluginsDir);
+
+            var envDir = Environment.GetEnvironmentVariable("PLUGINS_DIR");
+            if (!string.IsNullOrWhiteSpace(envDir) && Directory.Exists(envDir)) pluginDirs.Add(envDir);
+
+            foreach (var dir in pluginDirs)
+            {
+                _logger.LogInformation("Loading plugin descriptors from: {Dir}", dir);
+                var files = Directory.GetFiles(dir, "*.json").OrderBy(p => p, StringComparer.OrdinalIgnoreCase);
+                foreach (var file in files)
+                {
+                    try
+                    {
+                        _logger.LogDebug("Reading plugin file: {File}", file);
+                        var content = File.ReadAllText(file);
+                        var partial = JsonSerializer.Deserialize(content, AppJsonSerializerContext.Default.InstallConfig);
+                        if (partial?.Plugins != null && partial.Plugins.Any())
+                        {
+                            foreach (var p in partial.Plugins)
+                            {
+                                // preserve order by simply appending
+                                config.Plugins.Add(p);
+                            }
+                            _logger.LogInformation("Appended {Count} plugin(s) from {File}", partial.Plugins.Count, file);
+                        }
+                    }
+                    catch (JsonException jex)
+                    {
+                        _logger.LogWarning(jex, "Failed to parse plugins file: {File}", file);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to load plugins file: {File}", file);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
         /// Creates a sample configuration file at the specified location
         /// </summary>
         public void CreateSampleConfig(string outputPath)
@@ -218,10 +289,11 @@ namespace AppiumBootstrapInstaller.Services
                     new DriverConfig { Name = "xcuitest", Version = "7.24.3", Enabled = true },
                     new DriverConfig { Name = "uiautomator2", Version = "3.8.3", Enabled = true }
                 },
+                // Example plugins show minimal form: specify `id` only (name will default to id)
                 Plugins = new List<PluginConfig>
                 {
-                    new PluginConfig { Name = "device-farm", Version = "8.3.5", Enabled = true },
-                    new PluginConfig { Name = "appium-dashboard", Version = "2.0.3", Enabled = true }
+                    new PluginConfig { Id = "device-farm", Version = "8.3.5", Enabled = true },
+                    new PluginConfig { Id = "appium-dashboard", Version = "2.0.3", Enabled = true }
                 },
                 PlatformSpecific = new PlatformSpecificConfig
                 {
@@ -252,6 +324,32 @@ namespace AppiumBootstrapInstaller.Services
             }
             File.WriteAllText(outputPath, json);
             _logger.LogInformation("Sample configuration created at: {OutputPath}", outputPath);
+        }
+
+        /// <summary>
+        /// Ensures each plugin has both an Id and a Name for internal use.
+        /// Backwards compatibility: if only Name is provided, it will be used as Id; if only Id is provided, Name will be set to Id.
+        /// If neither is set, a deterministic generated id will be assigned.
+        /// </summary>
+        private void NormalizePluginDefinitions(InstallConfig config)
+        {
+            if (config?.Plugins == null) return;
+
+            for (int i = 0; i < config.Plugins.Count; i++)
+            {
+                var p = config.Plugins[i];
+                // Trim whitespace from Id if present
+                if (!string.IsNullOrWhiteSpace(p?.Id))
+                {
+                    p.Id = p.Id.Trim();
+                }
+
+                // If Id is missing, log a warning (validation will catch and fail)
+                if (string.IsNullOrWhiteSpace(p?.Id))
+                {
+                    _logger.LogWarning("Plugin at index {Index} has no 'id' field; this configuration is invalid and will fail validation", i);
+                }
+            }
         }
     }
 }

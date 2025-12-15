@@ -680,7 +680,7 @@ function Install-AppiumPlugins {
     
     # Install each plugin
     foreach ($plugin in $plugins) {
-        $pluginName = $plugin.name
+        $pluginName = $plugin.id
         $pluginVersion = $plugin.version
         
         Write-Log "Installing plugin: $pluginName@$pluginVersion"
