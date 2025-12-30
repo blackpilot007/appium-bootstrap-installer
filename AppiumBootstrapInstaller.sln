@@ -5,6 +5,8 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AppiumBootstrapInstaller", "AppiumBootstrapInstaller\AppiumBootstrapInstaller.csproj", "{14667D52-8D92-4BC4-8ACD-EE2DA692D255}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AppiumBootstrapInstaller.Tests", "AppiumBootstrapInstaller.Tests\AppiumBootstrapInstaller.Tests.csproj", "{D558464C-6150-4160-B1D3-B2A11E344B1A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -27,6 +29,18 @@ Global
 		{14667D52-8D92-4BC4-8ACD-EE2DA692D255}.Release|x64.Build.0 = Release|Any CPU
 		{14667D52-8D92-4BC4-8ACD-EE2DA692D255}.Release|x86.ActiveCfg = Release|Any CPU
 		{14667D52-8D92-4BC4-8ACD-EE2DA692D255}.Release|x86.Build.0 = Release|Any CPU
+		{D558464C-6150-4160-B1D3-B2A11E344B1A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D558464C-6150-4160-B1D3-B2A11E344B1A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D558464C-6150-4160-B1D3-B2A11E344B1A}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{D558464C-6150-4160-B1D3-B2A11E344B1A}.Debug|x64.Build.0 = Debug|Any CPU
+		{D558464C-6150-4160-B1D3-B2A11E344B1A}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{D558464C-6150-4160-B1D3-B2A11E344B1A}.Debug|x86.Build.0 = Debug|Any CPU
+		{D558464C-6150-4160-B1D3-B2A11E344B1A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D558464C-6150-4160-B1D3-B2A11E344B1A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D558464C-6150-4160-B1D3-B2A11E344B1A}.Release|x64.ActiveCfg = Release|Any CPU
+		{D558464C-6150-4160-B1D3-B2A11E344B1A}.Release|x64.Build.0 = Release|Any CPU
+		{D558464C-6150-4160-B1D3-B2A11E344B1A}.Release|x86.ActiveCfg = Release|Any CPU
+		{D558464C-6150-4160-B1D3-B2A11E344B1A}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -71,6 +71,9 @@ namespace AppiumBootstrapInstaller.Models
         [JsonPropertyName("sessionId")]
         public string SessionId { get; set; } = string.Empty;
 
+        [JsonPropertyName("deviceId")]
+        public string DeviceId { get; set; } = string.Empty;
+
         [JsonPropertyName("appiumPort")]
         public int AppiumPort { get; set; }
 
@@ -118,8 +121,9 @@ namespace AppiumBootstrapInstaller.Models
     {
         Starting,
         Running,
-        Failed,
-        Stopped
+        Stopping,
+        Stopped,
+        Failed
     }
 
     /// <summary>
@@ -127,8 +131,11 @@ namespace AppiumBootstrapInstaller.Models
     /// </summary>
     public class PortRangeConfig
     {
-        // No explicit configuration needed - ports are allocated dynamically
-        // This class remains for backward compatibility but is essentially empty
+        [JsonPropertyName("startPort")]
+        public int StartPort { get; set; } = 4723;
+
+        [JsonPropertyName("endPort")]
+        public int EndPort { get; set; } = 4823;
     }
 
     /// <summary>

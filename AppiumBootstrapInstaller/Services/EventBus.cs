@@ -64,6 +64,11 @@ namespace AppiumBootstrapInstaller.Services
 
         public void Publish<TEvent>(TEvent eventData) where TEvent : class
         {
+            if (eventData == null)
+            {
+                throw new ArgumentNullException(nameof(eventData));
+            }
+
             var eventType = typeof(TEvent);
             List<Delegate>? handlersCopy = null;
 

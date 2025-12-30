@@ -11,10 +11,10 @@ namespace AppiumBootstrapInstaller.Plugins.Triggers
     {
         private readonly IEventBus _eventBus;
         private readonly Plugins.PluginRegistry _registry;
-        private readonly Plugins.PluginOrchestrator _orchestrator;
+        private readonly IPluginOrchestrator _orchestrator;
         private readonly ILogger<DeviceEventTrigger> _logger;
 
-        public DeviceEventTrigger(IEventBus eventBus, Plugins.PluginRegistry registry, Plugins.PluginOrchestrator orchestrator, ILogger<DeviceEventTrigger> logger)
+        public DeviceEventTrigger(IEventBus eventBus, Plugins.PluginRegistry registry, IPluginOrchestrator orchestrator, ILogger<DeviceEventTrigger> logger)
         {
             _eventBus = eventBus;
             _registry = registry;

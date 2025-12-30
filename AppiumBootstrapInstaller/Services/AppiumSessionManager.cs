@@ -90,17 +90,10 @@ namespace AppiumBootstrapInstaller.Services
                     if (allocatedPorts == null || allocatedPorts.Length == 0)
                     {
                         _logger.LogError("No available consecutive ports for device {DeviceId}", device.Id);
-                        _metrics.RecordPortAllocationFailure();
+                        _metrics.RecordSessionFailed(device.Platform, "NoPortsAvailable");
                         
-                        // Port exhaustion is likely not transient, don't retry
-                        if (attempt == maxRetries)
-                        {
-                            return null;
-                        }
-                        
-                        // Wait before retry in case ports are being released
-                        await Task.Delay(baseDelayMs * attempt);
-                        continue;
+                        // Port exhaustion is not transient, don't retry
+                        return null;
                     }
 
                 var appiumPort = allocatedPorts[0];
@@ -160,6 +153,7 @@ namespace AppiumBootstrapInstaller.Services
                 var session = new AppiumSession
                 {
                     SessionId = serviceName, // Use service name as session ID for easy lookup
+                    DeviceId = device.Id,
                     AppiumPort = appiumPort,
                     WdaLocalPort = wdaPort,
                     MjpegServerPort = mjpegPort,
@@ -312,8 +306,8 @@ namespace AppiumBootstrapInstaller.Services
         {
             if (device.AppiumSession == null)
             {
-                _logger.LogWarning("Cannot stop session for device {DeviceId} - no active session", device.Id);
-                return false;
+                _logger.LogInformation("No active session for device {DeviceId} - nothing to stop", device.Id);
+                return true;
             }
 
             var session = device.AppiumSession;
@@ -358,6 +352,7 @@ namespace AppiumBootstrapInstaller.Services
 
                     session.Status = SessionStatus.Stopped;
                     _logger.LogInformation("Successfully stopped session {SessionId}", session.SessionId);
+                    _metrics.RecordSessionStopped(device.Platform);
                     return true;
                 }
                 catch (OperationCanceledException)
