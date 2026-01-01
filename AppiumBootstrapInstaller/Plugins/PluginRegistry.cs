@@ -38,7 +38,7 @@ namespace AppiumBootstrapInstaller.Plugins
             _definitions.Add(new KeyValuePair<string, PluginConfig>(id, config));
         }
 
-        public IEnumerable<KeyValuePair<string, PluginConfig>> GetDefinitions() => _definitions;
+        public virtual IEnumerable<KeyValuePair<string, PluginConfig>> GetDefinitions() => _definitions;
 
         public PluginConfig? GetDefinition(string id)
         {

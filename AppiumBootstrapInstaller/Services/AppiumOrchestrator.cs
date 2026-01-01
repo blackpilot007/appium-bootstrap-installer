@@ -112,7 +112,7 @@ namespace AppiumBootstrapInstaller.Services
                         {
                             InstallFolder = _config.InstallFolder,
                             Services = _serviceProvider,
-                            Logger = _serviceProvider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<AppiumBootstrapInstaller.Plugins.PluginOrchestrator>>()
+                            Logger = _serviceProvider.GetService(typeof(Microsoft.Extensions.Logging.ILogger<AppiumBootstrapInstaller.Plugins.PluginOrchestrator>)) as Microsoft.Extensions.Logging.ILogger<AppiumBootstrapInstaller.Plugins.PluginOrchestrator> ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<AppiumBootstrapInstaller.Plugins.PluginOrchestrator>.Instance
                         };
 
                         await pluginOrchestrator.StartEnabledPluginsAsync(ctx, cancellationToken);

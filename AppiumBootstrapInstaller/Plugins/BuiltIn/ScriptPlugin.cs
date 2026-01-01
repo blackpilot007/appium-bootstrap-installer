@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -26,6 +27,10 @@ namespace AppiumBootstrapInstaller.Plugins.BuiltIn
 
         public override Task<bool> CheckHealthAsync()
         {
+            // If plugin is stopped, it's not healthy
+            if (State == PluginState.Stopped || State == PluginState.Error)
+                return Task.FromResult(false);
+
             try
             {
                 if (!string.IsNullOrWhiteSpace(_config.HealthCheckCommand))
@@ -115,21 +120,67 @@ namespace AppiumBootstrapInstaller.Plugins.BuiltIn
                 var argsList = TemplateResolver.ExpandList(_config.Arguments ?? new System.Collections.Generic.List<string>(), context) ?? new System.Collections.Generic.List<string>();
                 var workingDir = TemplateResolver.Expand(_config.WorkingDirectory ?? context.InstallFolder, context) ?? context.InstallFolder;
 
-                // Determine runtime hint
+                // Determine runtime hint based on file extension or explicit configuration
                 var runtimeHint = _config.Runtime;
                 if (string.IsNullOrEmpty(runtimeHint) && _config.EnvironmentVariables != null && _config.EnvironmentVariables.TryGetValue("runtime", out var r)) runtimeHint = r;
-                if (string.IsNullOrEmpty(runtimeHint) && !string.IsNullOrEmpty(exe) && exe.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase)) runtimeHint = "powershell";
+                
+                // Auto-detect runtime based on file extension if not explicitly set
+                if (string.IsNullOrEmpty(runtimeHint) && !string.IsNullOrEmpty(exe))
+                {
+                    if (exe.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase))
+                        runtimeHint = "powershell";
+                    else if (exe.EndsWith(".sh", StringComparison.OrdinalIgnoreCase))
+                        runtimeHint = "bash";
+                    else if (exe.EndsWith(".py", StringComparison.OrdinalIgnoreCase))
+                        runtimeHint = "python";
+                    else if (exe.EndsWith(".js", StringComparison.OrdinalIgnoreCase))
+                        runtimeHint = "node";
+                    else if (exe.EndsWith(".bat", StringComparison.OrdinalIgnoreCase) || exe.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase))
+                        runtimeHint = "batch";
+                }
 
                 string fileName;
                 string arguments;
 
-                if (!string.IsNullOrEmpty(runtimeHint) && runtimeHint.Equals("bash", StringComparison.OrdinalIgnoreCase))
+                // Select appropriate runtime wrapper based on hint
+                if (!string.IsNullOrEmpty(runtimeHint))
                 {
-                    fileName = "bash";
-                    arguments = $"{exe} {string.Join(' ', argsList)}".Trim();
+                    switch (runtimeHint.ToLowerInvariant())
+                    {
+                        case "bash":
+                            fileName = "bash";
+                            arguments = $"{exe} {string.Join(' ', argsList)}".Trim();
+                            break;
+                        
+                        case "python":
+                        case "python3":
+                            // Try python3 first (Linux/macOS), fallback to python (Windows)
+                            fileName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "python" : "python3";
+                            arguments = $"\"{exe}\" {string.Join(' ', argsList)}".Trim();
+                            break;
+                        
+                        case "node":
+                        case "nodejs":
+                            fileName = "node";
+                            arguments = $"\"{exe}\" {string.Join(' ', argsList)}".Trim();
+                            break;
+                        
+                        case "batch":
+                        case "cmd":
+                            fileName = "cmd.exe";
+                            arguments = $"/c \"{exe}\" {string.Join(' ', argsList)}".Trim();
+                            break;
+                        
+                        case "powershell":
+                        default:
+                            fileName = "powershell.exe";
+                            arguments = $"-ExecutionPolicy Bypass -File \"{exe}\" {string.Join(' ', argsList)}".Trim();
+                            break;
+                    }
                 }
                 else
                 {
+                    // Default to PowerShell if no runtime hint detected
                     fileName = "powershell.exe";
                     arguments = $"-ExecutionPolicy Bypass -File \"{exe}\" {string.Join(' ', argsList)}".Trim();
                 }
@@ -138,12 +189,17 @@ namespace AppiumBootstrapInstaller.Plugins.BuiltIn
                 {
                     FileName = fileName,
                     Arguments = arguments,
-                    WorkingDirectory = workingDir,
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     CreateNoWindow = true
                 };
+
+                // Only set WorkingDirectory if it exists
+                if (!string.IsNullOrWhiteSpace(workingDir) && System.IO.Directory.Exists(workingDir))
+                {
+                    psi.WorkingDirectory = workingDir;
+                }
 
                 if (_config.EnvironmentVariables != null)
                 {

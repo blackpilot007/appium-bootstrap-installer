@@ -8,7 +8,7 @@ namespace AppiumBootstrapInstaller.Plugins
 {
     public static class TemplateResolver
     {
-        private static readonly Regex BraceToken = new("\\{([^}]+)\\}", RegexOptions.Compiled);
+        private static readonly Regex BraceToken = new("(?<![$])\\{([^}]+)\\}", RegexOptions.Compiled);
         private static readonly Regex DollarToken = new("\\$\\{([^}]+)\\}", RegexOptions.Compiled);
 
         public static string? Expand(string? input, PluginContext ctx)

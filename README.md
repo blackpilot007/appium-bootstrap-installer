@@ -11,6 +11,7 @@
 
 -  **Dynamic Configuration** – Install any Appium driver or plugin via JSON configuration
 -  **Automated Installation** – One-command setup of Node.js, Appium, drivers, and plugins
+-  **Plugin System** – Extend functionality with scripts (Python/Node.js/Bash/PowerShell/Batch), processes, and custom plugins
 -  **Smart Device Monitoring** – Auto-detects Android/iOS device connections with detailed info
 -  **Event-Driven Architecture** – Pub/sub event bus for device and session lifecycle events
 -  **Dual iOS Detection** – libimobiledevice (primary) with go-ios fallback
@@ -148,13 +149,170 @@ chmod +x AppiumBootstrapInstaller
 
 | Guide | Description |
 |-------|-------------|
+| [**Plugin System Guide**](docs/SCRIPTPLUGIN_ENHANCEMENTS.md) | **NEW!** Extend with Python/Node.js/Bash scripts |
+| [Plugin Architecture](docs/PLUGIN_ARCHITECTURE.md) | Complete plugin system architecture |
+| [Plugin Quick Start](docs/PLUGIN_QUICK_START.md) | Step-by-step plugin implementation |
 | [Architecture Assessment](docs/ARCHITECTURE_ASSESSMENT.md) | Complete architecture analysis |
-| [Long-Running Service Analysis](docs/LONG_RUNNING_SERVICE_ANALYSIS.md) | Performance & memory analysis |
 | [Configuration Guide](docs/CONFIGURATION.md) | Detailed configuration options |
 | [User Guide](USER_GUIDE.md) | Step-by-step usage instructions |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Common issues and solutions |
 | [Building from Source](docs/BUILDING.md) | Build and development guide |
 | [Release Notes](RELEASE_NOTES.md) | Version history and changes |
+
+##  Plugin System (NEW!)
+
+Extend Appium Bootstrap Installer with custom automation using the built-in plugin system. Plugins can run scripts, processes, or custom code triggered by device events.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Device Event Flow                             │
+│                                                                  │
+│  Device Connected  ──►  EventBus  ──►  Plugin Trigger          │
+│       ▼                                      ▼                   │
+│  USB Detection          Pub/Sub          Python Script          │
+│  (adb/idevice)         Events            Node.js Script         │
+│                                          PowerShell Script       │
+│                                          Bash Script             │
+│                                          Any Process             │
+│                                                                  │
+│  Your scripts get called with device info as template variables │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Quick Example
+
+**Run a Python script when any device connects:**
+```json
+{
+  "pluginSystem": {
+    "enabled": true,
+    "plugins": [
+      {
+        "name": "device-notifier",
+        "type": "script",
+        "executable": "scripts/notify.py",
+        "arguments": ["--device", "{{DEVICE_ID}}", "--platform", "{{DEVICE_PLATFORM}}"],
+        "triggerOn": "device-connected",
+        "enabled": true
+      }
+    ]
+  }
+}
+```
+
+### Supported Script Types
+
+| Type | Extensions | Example |
+|------|------------|---------|
+| **Python** | `.py` | `monitor.py` |
+| **Node.js** | `.js` | `metrics.js` |
+| **PowerShell** | `.ps1` | `setup.ps1` |
+| **Bash** | `.sh` | `cleanup.sh` |
+| **Batch** | `.bat`, `.cmd` | `backup.bat` |
+
+**No runtime configuration needed** – file extensions are auto-detected!
+
+### Plugin Triggers
+
+Plugins can be triggered by:
+- `startup` - Run when installer starts
+- `device-connected` - Run when device connects
+- `device-disconnected` - Run when device disconnects  
+- `manual` - Start/stop via API
+
+### Template Variables
+
+Use these variables in your plugin configurations:
+
+| Variable | Example Value | Description |
+|----------|---------------|-------------|
+| `{{DEVICE_ID}}` | `emulator-5554` | Device UDID/serial |
+| `{{DEVICE_PLATFORM}}` | `android` | Platform type |
+| `{{DEVICE_NAME}}` | `Pixel 6` | Device model name |
+| `{{APPIUM_PORT}}` | `4723` | Appium server port |
+| `{{INSTALL_FOLDER}}` | `C:\Appium` | Installation directory |
+
+### Common Use Cases
+
+**1. Slack Notifications**
+```json
+{
+  "name": "slack-notify",
+  "type": "script",
+  "executable": "notify.py",
+  "arguments": ["--message", "Device {{DEVICE_ID}} connected"],
+  "triggerOn": "device-connected"
+}
+```
+
+**2. Device Setup Automation**
+```json
+{
+  "name": "auto-provision",
+  "type": "script",
+  "executable": "provision.sh",
+  "arguments": ["{{DEVICE_ID}}"],
+  "triggerOn": "device-connected",
+  "stopOnDisconnect": true
+}
+```
+
+**3. Metrics Collection**
+```json
+{
+  "name": "metrics-collector",
+  "type": "script",
+  "executable": "metrics.js",
+  "arguments": ["--port", "3000"],
+  "triggerOn": "startup"
+}
+```
+
+**4. Log Forwarding**
+```json
+{
+  "name": "log-forwarder",
+  "type": "process",
+  "executable": "fluent-bit",
+  "arguments": ["-c", "config/fluent-bit.conf"],
+  "triggerOn": "startup"
+}
+```
+
+### Full Plugin Configuration Example
+
+```json
+{
+  "pluginSystem": {
+    "enabled": true,
+    "plugins": [
+      {
+        "name": "device-monitor",
+        "type": "script",
+        "executable": "scripts/monitor.py",
+        "arguments": [
+          "--device", "{{DEVICE_ID}}",
+          "--port", "{{APPIUM_PORT}}"
+        ],
+        "triggerOn": "device-connected",
+        "stopOnDisconnect": true,
+        "enabled": true,
+        "environmentVariables": {
+          "PYTHONUNBUFFERED": "1",
+          "LOG_LEVEL": "info"
+        },
+        "healthCheck": {
+          "command": "python scripts/health.py",
+          "intervalSeconds": 30,
+          "timeoutSeconds": 5
+        }
+      }
+    ]
+  }
+}
+```
+
+**Learn more:** [ScriptPlugin Enhancements Guide](docs/SCRIPTPLUGIN_ENHANCEMENTS.md) | [Plugin Architecture](docs/PLUGIN_ARCHITECTURE.md)
 
 ##  Command-Line Options
 
@@ -187,7 +345,7 @@ AppiumBootstrapInstaller --help
     { "name": "uiautomator2", "version": "3.8.3", "enabled": true }
   ],
   "plugins": [
-    { "id": "device-farm", "version": "8.3.5", "enabled": true },
+    { "id": "device-farm", "version": "8.3.5", "enabled": true }
   ],
   "platformSpecific": {
     "windows": {
@@ -215,7 +373,7 @@ AppiumBootstrapInstaller --help
 }
 ```
 
-### Multi-Platform Lab
+### Multi-Platform Lab with Custom Plugins
 ```json
 {
   "installFolder": "${HOME}/appium-lab",
@@ -223,16 +381,35 @@ AppiumBootstrapInstaller --help
   "appiumVersion": "2.17.1",
   "drivers": [
     { "name": "uiautomator2", "version": "3.8.3", "enabled": true },
-    { "name": "xcuitest", "version": "7.24.3", "enabled": true },
-    { "name": "flutter", "version": "2.8.1", "enabled": true }
+    { "name": "xcuitest", "version": "7.24.3", "enabled": true }
   ],
   "plugins": [
     { "id": "device-farm", "version": "8.3.5", "enabled": true },
-    { "id": "appium-dashboard", "version": "2.0.3", "enabled": true },
-    { "id": "images", "version": "2.1.7", "enabled": true }
+    { "id": "appium-dashboard", "version": "2.0.3", "enabled": true }
   ],
   "enableDeviceListener": true,
-  "autoStartAppium": true
+  "autoStartAppium": true,
+  "pluginSystem": {
+    "enabled": true,
+    "plugins": [
+      {
+        "name": "slack-notifier",
+        "type": "script",
+        "executable": "scripts/notify.py",
+        "arguments": ["--device", "{{DEVICE_ID}}"],
+        "triggerOn": "device-connected",
+        "enabled": true
+      },
+      {
+        "name": "metrics-dashboard",
+        "type": "script",
+        "executable": "metrics/server.js",
+        "arguments": ["--port", "3000"],
+        "triggerOn": "startup",
+        "enabled": true
+      }
+    ]
+  }
 }
 ```
 
@@ -391,6 +568,8 @@ Contributions welcome! Please:
 2. Create a feature branch
 3. Make your changes
 4. Submit a pull request
+
+For maintainers creating releases, see [RELEASE_PROCESS.md](RELEASE_PROCESS.md) for detailed release workflow.
 
 ##  License
 

@@ -1,0 +1,363 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # Trigger on version tags like v0.10.2, v1.0.0, etc.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., 0.10.2)'
+        required: true
+        type: string
+      release_type:
+        description: 'Release type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - major  # 0.10.1 -> 1.0.0
+          - minor  # 0.10.1 -> 0.11.0
+          - patch  # 0.10.1 -> 0.10.2
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  PROJECT_FILE: 'AppiumBootstrapInstaller/AppiumBootstrapInstaller.csproj'
+  BUILD_CONFIGURATION: 'Release'
+
+jobs:
+  prepare-release:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release_name: ${{ steps.version.outputs.release_name }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Determine version
+      id: version
+      run: |
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          # Manual trigger - use provided version
+          if [[ -n "${{ inputs.version }}" ]]; then
+            VERSION="${{ inputs.version }}"
+          else
+            # Auto-increment based on release type
+            CURRENT_VERSION=$(cat publish/VERSION | tr -d '[:space:]')
+            IFS='.' read -ra VER <<< "$CURRENT_VERSION"
+            MAJOR=${VER[0]}
+            MINOR=${VER[1]}
+            PATCH=${VER[2]}
+            
+            case "${{ inputs.release_type }}" in
+              major)
+                MAJOR=$((MAJOR + 1))
+                MINOR=0
+                PATCH=0
+                ;;
+              minor)
+                MINOR=$((MINOR + 1))
+                PATCH=0
+                ;;
+              patch)
+                PATCH=$((PATCH + 1))
+                ;;
+            esac
+            
+            VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          fi
+        else
+          # Tag trigger - extract version from tag
+          VERSION="${GITHUB_REF#refs/tags/v}"
+        fi
+        
+        echo "version=${VERSION}" >> $GITHUB_OUTPUT
+        echo "release_name=v${VERSION}" >> $GITHUB_OUTPUT
+        echo "🚀 Release version: ${VERSION}"
+
+  build-multiplatform:
+    name: Build ${{ matrix.platform-name }}
+    needs: prepare-release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            runtime: win-x64
+            platform-name: Windows x64
+            artifact-name: windows-x64
+            exe-ext: .exe
+          - os: windows-latest
+            runtime: win-arm64
+            platform-name: Windows ARM64
+            artifact-name: windows-arm64
+            exe-ext: .exe
+          - os: ubuntu-latest
+            runtime: linux-x64
+            platform-name: Linux x64
+            artifact-name: linux-x64
+            exe-ext: ''
+          - os: ubuntu-latest
+            runtime: linux-arm64
+            platform-name: Linux ARM64
+            artifact-name: linux-arm64
+            exe-ext: ''
+          - os: macos-13  # Intel Mac
+            runtime: osx-x64
+            platform-name: macOS Intel
+            artifact-name: macos-x64
+            exe-ext: ''
+          - os: macos-latest  # ARM64 Mac
+            runtime: osx-arm64
+            platform-name: macOS Apple Silicon
+            artifact-name: macos-arm64
+            exe-ext: ''
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Restore dependencies
+      run: dotnet restore ${{ env.PROJECT_FILE }}
+
+    - name: Build ${{ matrix.platform-name }}
+      run: |
+        dotnet publish ${{ env.PROJECT_FILE }} \
+          --configuration ${{ env.BUILD_CONFIGURATION }} \
+          --runtime ${{ matrix.runtime }} \
+          --self-contained true \
+          -p:PublishSingleFile=true \
+          -p:PublishTrimmed=true \
+          -p:PublishReadyToRun=true \
+          -p:IncludeNativeLibrariesForSelfExtract=true \
+          -p:Version=${{ needs.prepare-release.outputs.version }} \
+          --output ./build-output
+
+    - name: Package Platform Scripts (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $outputDir = "./release-${{ matrix.artifact-name }}"
+        New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+        
+        # Copy executable
+        Copy-Item "./build-output/AppiumBootstrapInstaller${{ matrix.exe-ext }}" -Destination $outputDir
+        
+        # Copy platform-specific scripts
+        if ("${{ matrix.runtime }}" -like "win-*") {
+          Copy-Item "Platform/Windows/Scripts/*" -Destination "$outputDir/Platform/Windows/Scripts/" -Recurse -Force
+        }
+        
+        # Copy common files
+        Copy-Item "publish/config.sample.json" -Destination "$outputDir/config.sample.json" -ErrorAction SilentlyContinue
+        Copy-Item "LICENSE" -Destination $outputDir -ErrorAction SilentlyContinue
+        Copy-Item "README.md" -Destination $outputDir -ErrorAction SilentlyContinue
+        Copy-Item "USER_GUIDE.md" -Destination $outputDir -ErrorAction SilentlyContinue
+        
+        # Create VERSION file
+        "${{ needs.prepare-release.outputs.version }}" | Out-File -FilePath "$outputDir/VERSION" -Encoding utf8 -NoNewline
+
+    - name: Package Platform Scripts (Unix)
+      if: runner.os != 'Windows'
+      shell: bash
+      run: |
+        outputDir="./release-${{ matrix.artifact-name }}"
+        mkdir -p "$outputDir"
+        
+        # Copy executable
+        cp "./build-output/AppiumBootstrapInstaller" "$outputDir/"
+        chmod +x "$outputDir/AppiumBootstrapInstaller"
+        
+        # Copy platform-specific scripts
+        if [[ "${{ matrix.runtime }}" == linux-* ]]; then
+          mkdir -p "$outputDir/Platform/Linux/Scripts"
+          cp -r Platform/Linux/Scripts/* "$outputDir/Platform/Linux/Scripts/" || true
+          chmod +x "$outputDir/Platform/Linux/Scripts/"*.sh || true
+        elif [[ "${{ matrix.runtime }}" == osx-* ]]; then
+          mkdir -p "$outputDir/Platform/MacOS/Scripts"
+          cp -r Platform/MacOS/Scripts/* "$outputDir/Platform/MacOS/Scripts/" || true
+          chmod +x "$outputDir/Platform/MacOS/Scripts/"*.sh || true
+        fi
+        
+        # Copy common files
+        cp publish/config.sample.json "$outputDir/config.sample.json" 2>/dev/null || true
+        cp LICENSE "$outputDir/" 2>/dev/null || true
+        cp README.md "$outputDir/" 2>/dev/null || true
+        cp USER_GUIDE.md "$outputDir/" 2>/dev/null || true
+        
+        # Create VERSION file
+        echo -n "${{ needs.prepare-release.outputs.version }}" > "$outputDir/VERSION"
+
+    - name: Create archive (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $archiveName = "AppiumBootstrapInstaller-${{ needs.prepare-release.outputs.release_name }}-${{ matrix.runtime }}.zip"
+        Compress-Archive -Path "./release-${{ matrix.artifact-name }}/*" -DestinationPath $archiveName -Force
+        
+        # Calculate SHA256
+        $hash = Get-FileHash $archiveName -Algorithm SHA256
+        "$($hash.Hash)  $archiveName" | Out-File -FilePath "${archiveName}.sha256" -Encoding utf8
+
+    - name: Create archive (Unix)
+      if: runner.os != 'Windows'
+      shell: bash
+      run: |
+        archiveName="AppiumBootstrapInstaller-${{ needs.prepare-release.outputs.release_name }}-${{ matrix.runtime }}.zip"
+        cd "./release-${{ matrix.artifact-name }}"
+        zip -r "../$archiveName" .
+        cd ..
+        
+        # Calculate SHA256
+        sha256sum "$archiveName" > "${archiveName}.sha256"
+
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-${{ matrix.artifact-name }}
+        path: |
+          AppiumBootstrapInstaller-*.zip
+          AppiumBootstrapInstaller-*.sha256
+        retention-days: 90
+
+  create-release:
+    name: Create GitHub Release
+    needs: [prepare-release, build-multiplatform]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./artifacts
+
+    - name: Organize artifacts
+      run: |
+        mkdir -p ./release-assets
+        find ./artifacts -name "*.zip" -exec cp {} ./release-assets/ \;
+        find ./artifacts -name "*.sha256" -exec cp {} ./release-assets/ \;
+        ls -lah ./release-assets/
+
+    - name: Read release notes
+      id: release_notes
+      run: |
+        if [ -f "RELEASE_NOTES.md" ]; then
+          # Extract the latest version's notes (first section)
+          NOTES=$(awk '/^## / {if (++count == 2) exit} count == 1 {print}' RELEASE_NOTES.md)
+          if [ -z "$NOTES" ]; then
+            NOTES="See [RELEASE_NOTES.md](RELEASE_NOTES.md) for details."
+          fi
+        else
+          NOTES="Release ${{ needs.prepare-release.outputs.version }}"
+        fi
+        
+        # Save to file to preserve formatting
+        echo "$NOTES" > release_notes.txt
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ needs.prepare-release.outputs.release_name }}
+        name: Release ${{ needs.prepare-release.outputs.release_name }}
+        body_path: release_notes.txt
+        prerelease: ${{ inputs.prerelease || false }}
+        draft: false
+        files: ./release-assets/*
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Update VERSION file
+      if: github.event_name == 'workflow_dispatch'
+      run: |
+        echo -n "${{ needs.prepare-release.outputs.version }}" > publish/VERSION
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add publish/VERSION
+        git commit -m "chore: bump version to ${{ needs.prepare-release.outputs.version }}"
+        git push origin HEAD:main
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  test-release:
+    name: Test Release Package
+    needs: [prepare-release, build-multiplatform]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: build-windows-x64
+          - os: ubuntu-latest
+            artifact: build-linux-x64
+          - os: macos-latest
+            artifact: build-macos-arm64
+
+    steps:
+    - name: Download artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ matrix.artifact }}
+
+    - name: Extract and test (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $zipFile = Get-ChildItem -Filter "*.zip" | Select-Object -First 1
+        Expand-Archive -Path $zipFile.FullName -DestinationPath ./test-install
+        
+        # Verify files exist
+        $requiredFiles = @("AppiumBootstrapInstaller.exe", "VERSION", "LICENSE")
+        foreach ($file in $requiredFiles) {
+          if (-not (Test-Path "test-install/$file")) {
+            Write-Error "Missing required file: $file"
+            exit 1
+          }
+        }
+        
+        # Test executable
+        $version = & "./test-install/AppiumBootstrapInstaller.exe" --version
+        Write-Host "✅ Version check passed: $version"
+
+    - name: Extract and test (Unix)
+      if: runner.os != 'Windows'
+      shell: bash
+      run: |
+        zipFile=$(ls *.zip | head -n 1)
+        unzip "$zipFile" -d ./test-install
+        
+        # Verify files exist
+        requiredFiles=("AppiumBootstrapInstaller" "VERSION" "LICENSE")
+        for file in "${requiredFiles[@]}"; do
+          if [ ! -f "test-install/$file" ]; then
+            echo "❌ Missing required file: $file"
+            exit 1
+          fi
+        done
+        
+        # Test executable
+        chmod +x ./test-install/AppiumBootstrapInstaller
+        version=$(./test-install/AppiumBootstrapInstaller --version)
+        echo "✅ Version check passed: $version"

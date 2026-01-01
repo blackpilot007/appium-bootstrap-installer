@@ -57,6 +57,7 @@ namespace AppiumBootstrapInstaller.Plugins
             sb.AppendLine("[Install]");
             sb.AppendLine("WantedBy=multi-user.target");
 
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             File.WriteAllText(path, sb.ToString());
             return path;
         }
@@ -82,9 +83,19 @@ namespace AppiumBootstrapInstaller.Plugins
             sb.AppendLine($"command={command}");
             sb.AppendLine("autostart=true");
             sb.AppendLine("autorestart=true");
+            if (!string.IsNullOrWhiteSpace(cfg.WorkingDirectory))
+            {
+                sb.AppendLine($"directory={cfg.WorkingDirectory}");
+            }
+            if (cfg.EnvironmentVariables != null && cfg.EnvironmentVariables.Count > 0)
+            {
+                var envVars = string.Join(",", cfg.EnvironmentVariables.Select(kv => $"{kv.Key}=\"{kv.Value}\""));
+                sb.AppendLine($"environment={envVars}");
+            }
             sb.AppendLine($"stdout_logfile={stdoutLog}");
             sb.AppendLine($"stderr_logfile={stderrLog}");
 
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             File.WriteAllText(path, sb.ToString());
             return path;
         }
@@ -96,12 +107,14 @@ namespace AppiumBootstrapInstaller.Plugins
         public string[] GenerateAll(System.Collections.Generic.IEnumerable<PluginConfig> plugins, string installFolder)
         {
             var outputs = new System.Collections.Generic.List<string>();
+            var serviceNames = new System.Collections.Generic.List<string>();
             foreach (var p in plugins)
             {
                 try
                 {
                     outputs.Add(GenerateSystemdUnit(p, installFolder));
                     outputs.Add(GenerateSupervisorConf(p, installFolder));
+                    serviceNames.Add(SafeId(p) + ".service");
                 }
                 catch
                 {
@@ -115,7 +128,18 @@ namespace AppiumBootstrapInstaller.Plugins
             installSb.AppendLine("#!/bin/bash");
             installSb.AppendLine("set -euo pipefail");
             installSb.AppendLine("GEN_DIR=\"$(cd \"$(dirname \"$0\")\" && pwd)\"");
-            installSb.AppendLine("echo \"Installing generated services from $GEN_DIR\"\n");
+            installSb.AppendLine("echo \"Installing generated services from $GEN_DIR\"");
+
+            if (serviceNames.Count == 0)
+            {
+                installSb.AppendLine("echo \"No plugin services to install\"");
+            }
+            else
+            {
+                installSb.AppendLine($"echo \"Installing {serviceNames.Count} plugin service(s): {string.Join(", ", serviceNames)}\"");
+            }
+            installSb.AppendLine();
+
             installSb.AppendLine("if command -v systemctl >/dev/null 2>&1; then");
             installSb.AppendLine("  echo \"Installing systemd unit files...\"");
             installSb.AppendLine("  sudo cp \"$GEN_DIR/systemd/*.service\" /etc/systemd/system/ || true");

@@ -10,7 +10,7 @@ namespace AppiumBootstrapInstaller.Plugins
     using AppiumBootstrapInstaller.Models;
     using System.Collections.Concurrent;
 
-    public class PluginOrchestrator
+    public class PluginOrchestrator : IPluginOrchestrator
     {
         private readonly PluginRegistry _registry;
         private readonly ILogger<PluginOrchestrator> _logger;
@@ -181,7 +181,7 @@ namespace AppiumBootstrapInstaller.Plugins
             }
         }
 
-        public async Task<bool> StartPluginAsync(string pluginId, PluginContext context, CancellationToken cancellationToken)
+        public virtual async Task<bool> StartPluginAsync(string pluginId, PluginContext context, CancellationToken cancellationToken)
         {
             // pluginId here refers to a definition id. Create a runtime instance id.
             var def = _registry.GetDefinition(pluginId);
@@ -248,7 +248,7 @@ namespace AppiumBootstrapInstaller.Plugins
             }
         }
 
-        public async Task<bool> StopPluginAsync(string pluginId, CancellationToken cancellationToken)
+        public virtual async Task<bool> StopPluginAsync(string pluginId, CancellationToken cancellationToken)
         {
             var instance = _registry.GetInstance(pluginId);
             if (instance == null)
