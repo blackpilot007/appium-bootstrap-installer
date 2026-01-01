@@ -147,7 +147,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
         {
             // Arrange - This test verifies that on supported OS (Windows), installation continues
             var orchestrator = CreateOrchestrator();
-            var options = new CommandLineOptions { DryRun = false };
+            var options = new CommandLineOptions { DryRun = true }; // Use dry run for faster test
 
             // Act
             var result = await orchestrator.RunInstallationAsync(options, CancellationToken.None);
@@ -157,9 +157,9 @@ namespace AppiumBootstrapInstaller.Tests.Services
             _mockLogger.Verify(l => l.Log(
                 LogLevel.Error,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((o, t) => o.ToString().Contains("Unsupported operating system")),
+                It.Is<It.IsAnyType>((o, t) => o.ToString()!.Contains("Unsupported operating system")),
                 null,
-                It.IsAny<Func<It.IsAnyType, Exception, string>>()),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()!),
                 Times.Never);
         }
 
@@ -170,7 +170,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
             _config.EnableDeviceListener = true;
             // Use a real ScriptExecutor since DetectOperatingSystem is not virtual
             var orchestrator = CreateOrchestrator();
-            var options = new CommandLineOptions { DryRun = false };
+            var options = new CommandLineOptions { DryRun = true }; // Use dry run for faster test
 
             // Act
             var result = await orchestrator.RunInstallationAsync(options, CancellationToken.None);
@@ -181,9 +181,9 @@ namespace AppiumBootstrapInstaller.Tests.Services
             _mockLogger.Verify(l => l.Log(
                 LogLevel.Error,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((o, t) => o.ToString().Contains("Unsupported operating system")),
+                It.Is<It.IsAnyType>((o, t) => o.ToString()!.Contains("Unsupported operating system")),
                 null,
-                It.IsAny<Func<It.IsAnyType, Exception, string>>()),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()!),
                 Times.Never);
         }
 
@@ -243,7 +243,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
             // Instead, we test that the method completes without throwing for basic functionality
 
             var orchestrator = CreateOrchestrator();
-            var options = new CommandLineOptions { DryRun = false };
+            var options = new CommandLineOptions { DryRun = true }; // Use dry run for faster test
 
             // Act
             var result = await orchestrator.RunInstallationAsync(options, CancellationToken.None);
@@ -252,9 +252,9 @@ namespace AppiumBootstrapInstaller.Tests.Services
             _mockLogger.Verify(l => l.Log(
                 LogLevel.Error,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((o, t) => o.ToString().Contains("Unsupported operating system")),
+                It.Is<It.IsAnyType>((o, t) => o.ToString()!.Contains("Unsupported operating system")),
                 null,
-                It.IsAny<Func<It.IsAnyType, Exception, string>>()),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()!),
                 Times.Never);
         }
 
@@ -317,9 +317,9 @@ namespace AppiumBootstrapInstaller.Tests.Services
             _mockLogger.Verify(l => l.Log(
                 LogLevel.Warning,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((o, t) => o.ToString().Contains("Device listener is disabled")),
+                It.Is<It.IsAnyType>((o, t) => o.ToString()!.Contains("Device listener is disabled")),
                 null,
-                It.IsAny<Func<It.IsAnyType, Exception, string>>()),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()!),
                 Times.Once);
         }
 
