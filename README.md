@@ -234,7 +234,56 @@ Use these variables in your plugin configurations:
 
 ### Common Use Cases
 
-**1. Slack Notifications**
+**1. Post-Installation Tasks (Sequential Execution)**
+```json
+{
+  "pluginSystem": {
+    "enabled": true,
+    "plugins": [
+      {
+        "id": "unzip-artifacts",
+        "name": "Unzip Artifacts",
+        "type": "script",
+        "runtime": "powershell",
+        "script": "Expand-Archive -Path '${INSTALL_FOLDER}/artifacts.zip' -DestinationPath '${INSTALL_FOLDER}/extracted' -Force",
+        "triggerOn": "startup",
+        "enabled": true,
+        "dependsOn": []
+      },
+      {
+        "id": "copy-files",
+        "name": "Copy Files",
+        "type": "script",
+        "runtime": "powershell",
+        "script": "Copy-Item -Path '${INSTALL_FOLDER}/extracted/*' -Destination 'C:/target/' -Recurse -Force",
+        "triggerOn": "startup",
+        "enabled": true,
+        "dependsOn": ["unzip-artifacts"]
+      },
+      {
+        "id": "custom-service",
+        "name": "Run Custom Service",
+        "type": "process",
+        "executable": "${INSTALL_FOLDER}/myapp.exe",
+        "arguments": ["--config", "${INSTALL_FOLDER}/config.json"],
+        "workingDirectory": "${INSTALL_FOLDER}",
+        "triggerOn": "startup",
+        "enabled": true,
+        "restartPolicy": "always",
+        "healthCheck": {
+          "type": "port",
+          "port": 8080,
+          "intervalSeconds": 30
+        },
+        "dependsOn": ["copy-files"]
+      }
+    ]
+  }
+}
+```
+> **Note:** Plugins execute sequentially based on `dependsOn` - unzip runs first, then copy, then exe starts with auto-restart and health monitoring.
+
+**2. Slack Notifications**
 ```json
 {
   "name": "slack-notify",
@@ -245,7 +294,7 @@ Use these variables in your plugin configurations:
 }
 ```
 
-**2. Device Setup Automation**
+**3. Device Setup Automation**
 ```json
 {
   "name": "auto-provision",
@@ -257,7 +306,7 @@ Use these variables in your plugin configurations:
 }
 ```
 
-**3. Metrics Collection**
+**4. Metrics Collection**
 ```json
 {
   "name": "metrics-collector",
@@ -268,7 +317,7 @@ Use these variables in your plugin configurations:
 }
 ```
 
-**4. Log Forwarding**
+**5. Log Forwarding**
 ```json
 {
   "name": "log-forwarder",
