@@ -1,5 +1,7 @@
 ﻿# Appium Bootstrap Installer
 
+[![CI/CD Pipeline](https://github.com/blackpilot007/appium-bootstrap-installer/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/blackpilot007/appium-bootstrap-installer/actions/workflows/ci-cd.yml)
+[![Release](https://github.com/blackpilot007/appium-bootstrap-installer/actions/workflows/release.yml/badge.svg)](https://github.com/blackpilot007/appium-bootstrap-installer/actions/workflows/release.yml)
 [![License](https://img.shields.io/github/license/blackpilot007/appium-bootstrap-installer)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-8.0-purple)](https://dotnet.microsoft.com/)
 [![Version](https://img.shields.io/badge/version-0.10.1-blue)](RELEASE_NOTES.md)
