@@ -26,6 +26,10 @@ namespace AppiumBootstrapInstaller.Plugins.BuiltIn
 
         public override Task<bool> CheckHealthAsync()
         {
+            // If plugin is stopped, it's not healthy
+            if (State == PluginState.Stopped || State == PluginState.Error)
+                return Task.FromResult(false);
+
             // If a custom health-check command is configured, execute it and consider exit code 0 as healthy.
             try
             {
@@ -107,12 +111,17 @@ namespace AppiumBootstrapInstaller.Plugins.BuiltIn
                 {
                     FileName = exe,
                     Arguments = argsList != null ? string.Join(' ', argsList) : string.Empty,
-                    WorkingDirectory = workingDir,
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     CreateNoWindow = true
                 };
+
+                // Only set WorkingDirectory if it exists
+                if (!string.IsNullOrWhiteSpace(workingDir) && System.IO.Directory.Exists(workingDir))
+                {
+                    psi.WorkingDirectory = workingDir;
+                }
 
                 if (cfg.EnvironmentVariables != null)
                 {

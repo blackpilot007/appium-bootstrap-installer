@@ -136,16 +136,29 @@ Manage HTTP-based services with health checks.
 }
 ```
 
-### 3. **Script Plugin** (PowerShell/Bash/Python)
-Execute scripts with output capture.
+### 3. **Script Plugin** (PowerShell/Bash/Python/Node.js/Batch)
+Execute scripts with automatic runtime detection and output capture.
+
+**Supported Runtimes:**
+- **PowerShell** (.ps1) - Windows built-in, cross-platform with Core
+- **Bash** (.sh) - Linux/macOS built-in, Windows via Git Bash/WSL
+- **Python** (.py) - Requires Python 3.x installed
+- **Node.js** (.js) - Requires Node.js installed
+- **Batch/CMD** (.bat, .cmd) - Windows built-in
+
+**Runtime Detection:**
+1. Explicit `runtime` property
+2. Automatic file extension detection
+3. Default fallback to PowerShell
 
 **Use Cases:**
 - Setup/teardown scripts
 - Environment validation
-- Data collection
-- Custom automation
+- Data collection and analytics
+- Custom automation workflows
+- Cross-platform scripting
 
-**Configuration Example:**
+**Configuration Example (with auto-detection)**:
 ```json
 {
   "plugins": [
@@ -153,15 +166,36 @@ Execute scripts with output capture.
       "id": "device-provisioner",
       "type": "script",
       "enabled": true,
-      "runtime": "powershell",
-      "script": "${INSTALL_FOLDER}/scripts/provision-device.ps1",
-      "arguments": ["-DeviceId", "{deviceId}"],
+      "executable": "${INSTALL_FOLDER}/scripts/provision-device.py",
+      "arguments": ["--device-id", "{deviceId}", "--verbose"],
       "triggerOn": "device-connected",
+      "environmentVariables": {
+        "PYTHONUNBUFFERED": "1"
+      },
       "timeout": 300
     }
   ]
 }
 ```
+
+**Configuration Example (explicit runtime)**:
+```json
+{
+  "plugins": [
+    {
+      "id": "metrics-collector",
+      "type": "script",
+      "enabled": true,
+      "executable": "collector.js",
+      "runtime": "node",
+      "arguments": ["--interval", "5000"],
+      "workingDirectory": "${INSTALL_FOLDER}/metrics"
+    }
+  ]
+}
+```
+
+**See also:** [ScriptPlugin Enhancements Guide](SCRIPTPLUGIN_ENHANCEMENTS.md)
 
 ### 4. **Pipeline Plugin** (Sequential Execution)
 Chain multiple plugins together.
