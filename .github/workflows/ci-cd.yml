@@ -2,10 +2,10 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, develop, feature/** ]
+    branches: [ main, develop ]  # Only run on protected branches
     tags: [ 'v*' ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, develop ]  # Run on PRs targeting these branches
   workflow_dispatch:
     inputs:
       version:
