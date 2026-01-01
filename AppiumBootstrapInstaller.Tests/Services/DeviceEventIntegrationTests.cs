@@ -679,7 +679,8 @@ namespace AppiumBootstrapInstaller.Tests.Services
             await Task.Delay(50);
             Assert.Equal(1, receivedCount);
 
-            // Subscription cleanup // Unsubscribe
+            // Unsubscribe
+            _eventBus.Unsubscribe(handler);
 
             _eventBus.Publish(new DeviceConnectedEvent(device));
             await Task.Delay(50);

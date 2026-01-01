@@ -49,7 +49,7 @@ namespace AppiumBootstrapInstaller.Plugins.Triggers
                     var trigger = cfg?.TriggerOn?.ToLowerInvariant();
                     if (string.IsNullOrEmpty(trigger)) continue;
 
-                    if (trigger == "device-connected")
+                    if (trigger == "device-connected" && cfg.Enabled)
                     {
                         var ctx = new Plugins.PluginContext
                         {
@@ -64,8 +64,16 @@ namespace AppiumBootstrapInstaller.Plugins.Triggers
                             ["deviceId"] = device.Id
                         };
 
-                        // Start an instance for this device (or a single instance if plugin is not per-device)
-                        await _orchestrator.StartPluginAsync(defId, ctx, CancellationToken.None);
+                        try
+                        {
+                            // Start an instance for this device (or a single instance if plugin is not per-device)
+                            await _orchestrator.StartPluginAsync(defId, ctx, CancellationToken.None);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Failed to start plugin {PluginId} for device {DeviceId}", defId, device.Id);
+                            // Continue processing other plugins
+                        }
                     }
                 }
             }
@@ -89,7 +97,7 @@ namespace AppiumBootstrapInstaller.Plugins.Triggers
                     var trigger = cfg?.TriggerOn?.ToLowerInvariant();
                     if (string.IsNullOrEmpty(trigger)) continue;
 
-                    if (trigger == "device-disconnected")
+                    if (trigger == "device-disconnected" && cfg.Enabled)
                     {
                         var ctx = new Plugins.PluginContext
                         {
@@ -105,15 +113,31 @@ namespace AppiumBootstrapInstaller.Plugins.Triggers
                             ["deviceId"] = device.Id
                         };
 
-                        await _orchestrator.StartPluginAsync(defId, ctx, CancellationToken.None);
+                        try
+                        {
+                            await _orchestrator.StartPluginAsync(defId, ctx, CancellationToken.None);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Failed to start plugin {PluginId} for device disconnect {DeviceId}", defId, device.Id);
+                            // Continue processing other plugins
+                        }
                     }
 
                     // If this definition was configured to stop instances on disconnect, stop any running instances for this device
                     if (cfg?.TriggerOn?.ToLowerInvariant() == "device-connected" && cfg?.StopOnDisconnect == true)
                     {
                         var instanceId = $"{defId}:{device.Id}";
-                        _logger.LogInformation("Stopping plugin instance {InstanceId} due to device disconnect", instanceId);
-                        await _orchestrator.StopPluginAsync(instanceId, CancellationToken.None);
+                        try
+                        {
+                            _logger.LogInformation("Stopping plugin instance {InstanceId} due to device disconnect", instanceId);
+                            await _orchestrator.StopPluginAsync(instanceId, CancellationToken.None);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Failed to stop plugin instance {InstanceId} for device disconnect {DeviceId}", instanceId, device.Id);
+                            // Continue processing other plugins
+                        }
                     }
                 }
             }

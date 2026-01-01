@@ -370,7 +370,7 @@ namespace AppiumBootstrapInstaller.Tests.Plugins.BuiltIn
                 .ReturnsAsync(true);
 
             _mockOrchestrator
-                .Setup(o => o.StopPluginAsync(It.Is<string>(id => id == "stop-on-disconnect-plugin"), It.IsAny<CancellationToken>()))
+                .Setup(o => o.StopPluginAsync(It.Is<string>(id => id == "stop-on-disconnect-plugin:stop-test-device"), It.IsAny<CancellationToken>()))
                 .Callback<string, CancellationToken>((id, ct) => stopCalled = true)
                 .ReturnsAsync(true);
 
@@ -620,7 +620,7 @@ namespace AppiumBootstrapInstaller.Tests.Plugins.BuiltIn
 
             _mockOrchestrator
                 .Setup(o => o.StartPluginAsync("plugin-1", It.IsAny<PluginContext>(), It.IsAny<CancellationToken>()))
-                .ThrowsAsync(new InvalidOperationException("Plugin 1 failed"));
+                .Throws(new InvalidOperationException("Plugin 1 failed"));
 
             _mockOrchestrator
                 .Setup(o => o.StartPluginAsync("plugin-2", It.IsAny<PluginContext>(), It.IsAny<CancellationToken>()))
