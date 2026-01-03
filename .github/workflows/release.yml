@@ -98,11 +98,6 @@ jobs:
             platform-name: Windows x64
             artifact-name: windows-x64
             exe-ext: .exe
-          - os: windows-latest
-            runtime: win-arm64
-            platform-name: Windows ARM64
-            artifact-name: windows-arm64
-            exe-ext: .exe
           - os: ubuntu-latest
             runtime: linux-x64
             platform-name: Linux x64
