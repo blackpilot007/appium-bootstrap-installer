@@ -225,7 +225,7 @@ jobs:
           - os: windows-latest
             runtime: win-x64
             artifact-name: windows-x64
-          - os: macos-latest
+          - os: macos-15-intel
             runtime: osx-x64
             artifact-name: macos-x64
           - os: macos-latest
