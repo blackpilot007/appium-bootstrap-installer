@@ -132,17 +132,16 @@ jobs:
       run: dotnet restore ${{ env.PROJECT_FILE }}
 
     - name: Build ${{ matrix.platform-name }}
-      shell: bash
       run: |
-        dotnet publish ${{ env.PROJECT_FILE }} \
-          --configuration ${{ env.BUILD_CONFIGURATION }} \
-          --runtime ${{ matrix.runtime }} \
-          --self-contained true \
-          -p:PublishSingleFile=true \
-          -p:PublishTrimmed=false \
-          -p:PublishReadyToRun=true \
-          -p:IncludeNativeLibrariesForSelfExtract=true \
-          -p:Version=${{ needs.prepare-release.outputs.version }} \
+        dotnet publish ${{ env.PROJECT_FILE }} `
+          --configuration ${{ env.BUILD_CONFIGURATION }} `
+          --runtime ${{ matrix.runtime }} `
+          --self-contained true `
+          -p:PublishSingleFile=true `
+          -p:PublishTrimmed=false `
+          -p:PublishReadyToRun=false `
+          -p:IncludeNativeLibrariesForSelfExtract=true `
+          -p:Version=${{ needs.prepare-release.outputs.version }} `
           --output ./build-output
 
     - name: Package Platform Scripts (Windows)
@@ -152,12 +151,22 @@ jobs:
         $outputDir = "./release-${{ matrix.artifact-name }}"
         New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
         
+        # Check if build output exists
+        $exePath = "./build-output/AppiumBootstrapInstaller${{ matrix.exe-ext }}"
+        if (-not (Test-Path $exePath)) {
+          Write-Error "Build output not found: $exePath"
+          Get-ChildItem "./build-output/" -ErrorAction SilentlyContinue
+          exit 1
+        }
+        
         # Copy executable
-        Copy-Item "./build-output/AppiumBootstrapInstaller${{ matrix.exe-ext }}" -Destination $outputDir
+        Copy-Item $exePath -Destination $outputDir
         
         # Copy platform-specific scripts
         if ("${{ matrix.runtime }}" -like "win-*") {
-          Copy-Item "Platform/Windows/Scripts/*" -Destination "$outputDir/Platform/Windows/Scripts/" -Recurse -Force
+          if (Test-Path "Platform/Windows/Scripts/*") {
+            Copy-Item "Platform/Windows/Scripts/*" -Destination "$outputDir/Platform/Windows/Scripts/" -Recurse -Force
+          }
         }
         
         # Copy common files
