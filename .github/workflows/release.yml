@@ -108,7 +108,7 @@ jobs:
             platform-name: Linux ARM64
             artifact-name: linux-arm64
             exe-ext: ''
-          - os: macos-13  # Intel Mac
+          - os: macos-15-intel
             runtime: osx-x64
             platform-name: macOS Intel
             artifact-name: macos-x64
@@ -132,6 +132,7 @@ jobs:
       run: dotnet restore ${{ env.PROJECT_FILE }}
 
     - name: Build ${{ matrix.platform-name }}
+      shell: bash
       run: |
         dotnet publish ${{ env.PROJECT_FILE }} \
           --configuration ${{ env.BUILD_CONFIGURATION }} \
