@@ -136,7 +136,9 @@ namespace AppiumBootstrapInstaller
                     };
 
                     var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
+#pragma warning disable IL2026 // Using member 'System.Text.Json.JsonSerializer.Serialize<TValue>(TValue, JsonSerializerOptions)' which has 'RequiresUnreferencedCodeAttribute' can break functionality when trimming application code.
                     string json = JsonSerializer.Serialize(payload, jsonOptions);
+#pragma warning restore IL2026
 
                     // If --warnings-json flag is set or WARNINGS_JSON env var is truthy, print JSON to stdout.
                     var envWarningsJson = Environment.GetEnvironmentVariable("WARNINGS_JSON");

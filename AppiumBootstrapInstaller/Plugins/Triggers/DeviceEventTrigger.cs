@@ -47,7 +47,7 @@ namespace AppiumBootstrapInstaller.Plugins.Triggers
                     var defId = def.Key;
                     var cfg = def.Value;
                     var trigger = cfg?.TriggerOn?.ToLowerInvariant();
-                    if (string.IsNullOrEmpty(trigger)) continue;
+                    if (string.IsNullOrEmpty(trigger) || cfg == null) continue;
 
                     if (trigger == "device-connected" && cfg.Enabled)
                     {
@@ -95,7 +95,7 @@ namespace AppiumBootstrapInstaller.Plugins.Triggers
                     var defId = def.Key;
                     var cfg = def.Value;
                     var trigger = cfg?.TriggerOn?.ToLowerInvariant();
-                    if (string.IsNullOrEmpty(trigger)) continue;
+                    if (string.IsNullOrEmpty(trigger) || cfg == null) continue;
 
                     if (trigger == "device-disconnected" && cfg.Enabled)
                     {

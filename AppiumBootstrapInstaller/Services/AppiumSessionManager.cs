@@ -579,7 +579,9 @@ namespace AppiumBootstrapInstaller.Services
                                 StartedAt = DateTime.UtcNow.ToString("o")
                             };
 
+#pragma warning disable IL2026 // Using member 'System.Text.Json.JsonSerializer.Serialize<TValue>(TValue, JsonSerializerOptions)' which has 'RequiresUnreferencedCodeAttribute' can break functionality when trimming application code.
                             var json = System.Text.Json.JsonSerializer.Serialize(metadata, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+#pragma warning restore IL2026
                             File.WriteAllText(sessionJsonPath, json, Encoding.UTF8);
                         }
                         catch (Exception ex)
