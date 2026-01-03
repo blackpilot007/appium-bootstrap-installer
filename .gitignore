@@ -426,3 +426,5 @@ FodyWeavers.xsd
 # User Guide output
 USER_GUIDE.pdf
 USER_GUIDE.html
+/test-build-arm64-no-ready
+/test-build-arm64

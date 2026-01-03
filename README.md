@@ -4,7 +4,7 @@
 [![Release](https://github.com/blackpilot007/appium-bootstrap-installer/actions/workflows/release.yml/badge.svg)](https://github.com/blackpilot007/appium-bootstrap-installer/actions/workflows/release.yml)
 [![License](https://img.shields.io/github/license/blackpilot007/appium-bootstrap-installer)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-8.0-purple)](https://dotnet.microsoft.com/)
-[![Version](https://img.shields.io/badge/version-0.10.1-blue)](RELEASE_NOTES.md)
+[![Version](https://img.shields.io/github/v/release/blackpilot007/appium-bootstrap-installer)](https://github.com/blackpilot007/appium-bootstrap-installer/releases)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](https://github.com/blackpilot007/appium-bootstrap-installer)
 
 **Configuration-driven Appium infrastructure with dynamic driver/plugin installation and intelligent device monitoring.**
