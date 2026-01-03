@@ -165,7 +165,7 @@ jobs:
         
         # Copy platform-specific scripts
         if ("${{ matrix.runtime }}" -like "win-*") {
-          $scriptsPath = "Platform/Windows/Scripts"
+          $scriptsPath = "AppiumBootstrapInstaller/Platform/Windows/Scripts"
           $destPath = "$outputDir/Platform/Windows/Scripts"
           New-Item -ItemType Directory -Path $destPath -Force | Out-Null
           if (Test-Path $scriptsPath) {
@@ -196,11 +196,11 @@ jobs:
         # Copy platform-specific scripts
         if [[ "${{ matrix.runtime }}" == linux-* ]]; then
           mkdir -p "$outputDir/Platform/Linux/Scripts"
-          cp -r Platform/Linux/Scripts/* "$outputDir/Platform/Linux/Scripts/" || true
+          cp -r AppiumBootstrapInstaller/Platform/Linux/Scripts/* "$outputDir/Platform/Linux/Scripts/" || true
           chmod +x "$outputDir/Platform/Linux/Scripts/"*.sh || true
         elif [[ "${{ matrix.runtime }}" == osx-* ]]; then
           mkdir -p "$outputDir/Platform/MacOS/Scripts"
-          cp -r Platform/MacOS/Scripts/* "$outputDir/Platform/MacOS/Scripts/" || true
+          cp -r AppiumBootstrapInstaller/Platform/MacOS/Scripts/* "$outputDir/Platform/MacOS/Scripts/" || true
           chmod +x "$outputDir/Platform/MacOS/Scripts/"*.sh || true
         fi
         
