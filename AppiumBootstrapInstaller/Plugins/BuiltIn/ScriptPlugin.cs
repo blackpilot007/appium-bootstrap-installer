@@ -204,9 +204,15 @@ namespace AppiumBootstrapInstaller.Plugins.BuiltIn
                 if (_config.EnvironmentVariables != null)
                 {
                     var env = TemplateResolver.ExpandDictionary(_config.EnvironmentVariables, context);
-                    foreach (var kv in env)
+                    if (env != null)
                     {
-                        psi.Environment[kv.Key] = kv.Value;
+                        foreach (var kv in env)
+                        {
+                            if (kv.Key != null)
+                            {
+                                psi.Environment[kv.Key!] = kv.Value;
+                            }
+                        }
                     }
                 }
 
@@ -214,6 +220,7 @@ namespace AppiumBootstrapInstaller.Plugins.BuiltIn
                 if (_process != null)
                 {
                     _process.OutputDataReceived += (s, e) => { if (e.Data != null) _logger.LogInformation("[{Plugin}] {Line}", Id, e.Data); };
+                    _process.ErrorDataReceived += (s, e) => { if (e.Data != null) _logger.LogError("[{Plugin}] {Line}", Id, e.Data); };
                     _process.BeginOutputReadLine();
                     _process.BeginErrorReadLine();
                 }

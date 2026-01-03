@@ -337,11 +337,11 @@ namespace AppiumBootstrapInstaller.Services
             {
                 string[] candidateSources = new[] {
                     System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName,
-                    System.Reflection.Assembly.GetEntryAssembly()?.Location,
+                    System.AppContext.BaseDirectory,
                     Path.Combine(AppDomain.CurrentDomain.BaseDirectory, 
                         System.Reflection.Assembly.GetEntryAssembly()?.GetName().Name + ".exe"),
                     Path.Combine(AppDomain.CurrentDomain.BaseDirectory, AppDomain.CurrentDomain.FriendlyName)
-                };
+                }.Where(s => !string.IsNullOrEmpty(s)).ToArray()!;
 
                 string? found = null;
                 foreach (var candidate in candidateSources)
