@@ -10,6 +10,7 @@ namespace AppiumBootstrapInstaller.Plugins
     /// </summary>
     public class PluginRegistry
     {
+        private readonly object _lock = new();
         private readonly Dictionary<string, PluginConfig> _definitionsLookup = new();
         private readonly List<KeyValuePair<string, PluginConfig>> _definitions = new();
         private readonly ConcurrentDictionary<string, IPlugin> _instances = new();
@@ -19,23 +20,26 @@ namespace AppiumBootstrapInstaller.Plugins
         {
             if (string.IsNullOrWhiteSpace(id)) return;
 
-            // If already registered, replace config but preserve original order
-            if (_definitionsLookup.ContainsKey(id))
+            lock (_lock)
             {
-                _definitionsLookup[id] = config;
-                for (int i = 0; i < _definitions.Count; i++)
+                // If already registered, replace config but preserve original order
+                if (_definitionsLookup.ContainsKey(id))
                 {
-                    if (_definitions[i].Key == id)
+                    _definitionsLookup[id] = config;
+                    for (int i = 0; i < _definitions.Count; i++)
                     {
-                        _definitions[i] = new KeyValuePair<string, PluginConfig>(id, config);
-                        break;
+                        if (_definitions[i].Key == id)
+                        {
+                            _definitions[i] = new KeyValuePair<string, PluginConfig>(id, config);
+                            break;
+                        }
                     }
+                    return;
                 }
-                return;
-            }
 
-            _definitionsLookup[id] = config;
-            _definitions.Add(new KeyValuePair<string, PluginConfig>(id, config));
+                _definitionsLookup[id] = config;
+                _definitions.Add(new KeyValuePair<string, PluginConfig>(id, config));
+            }
         }
 
         public virtual IEnumerable<KeyValuePair<string, PluginConfig>> GetDefinitions() => _definitions;
