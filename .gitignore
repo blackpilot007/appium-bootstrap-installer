@@ -428,3 +428,5 @@ USER_GUIDE.pdf
 USER_GUIDE.html
 /test-build-arm64-no-ready
 /test-build-arm64
+/test-build-x64-no-trim
+/test-build-x64
