@@ -44,7 +44,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
                 eventBus.Publish(new DeviceConnectedEvent(device));
             }
 
-            await Task.Delay(1000); // Allow processing
+            await Task.Delay(50); // Allow processing
 
             // Assert
             Assert.Equal(eventCount, receivedCount);
@@ -69,7 +69,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
                 eventBus.Publish(new DeviceConnectedEvent(device));
             }
 
-            await Task.Delay(2000); // Allow processing
+            await Task.Delay(100); // Allow processing
             stopwatch.Stop();
 
             // Assert
@@ -110,7 +110,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
                 eventBus.Publish(new SessionFailedEvent(device, "Test failure"));
             }
 
-            await Task.Delay(2000);
+            await Task.Delay(100);
 
             // Assert
             Assert.Equal(eventsPerType, connectedCount);
@@ -148,7 +148,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
             ).ToArray();
 
             await Task.WhenAll(tasks);
-            await Task.Delay(1000);
+            await Task.Delay(50);
 
             // Assert
             Assert.Equal(publisherCount * eventsPerPublisher, receivedCount);
@@ -190,7 +190,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
             ).ToArray();
 
             await Task.WhenAll(publishTasks);
-            await Task.Delay(1000);
+            await Task.Delay(50);
 
             // Assert
             var totalEvents = publisherCount * eventsPerPublisher;
@@ -217,7 +217,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
                 eventBus.Publish(new DeviceConnectedEvent(device));
             }
 
-            await Task.Delay(1000);
+            await Task.Delay(50);
 
             // Assert
             Assert.Equal(eventCount, receivedDeviceIds.Count);
@@ -263,7 +263,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
                 eventBus.Publish(new DeviceConnectedEvent(device));
             }
 
-            await Task.Delay(2000);
+            await Task.Delay(100);
 
             // Assert
             Assert.Equal(subscriberCount, receivedCounts.Count);
@@ -308,7 +308,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
                 eventBus.Publish(new DeviceConnectedEvent(device));
             }
 
-            await Task.Delay(2000);
+            await Task.Delay(50);
 
             // Assert
             Assert.Equal(eventCount, fastCount);
@@ -346,7 +346,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
                 eventBus.Publish(new DeviceConnectedEvent(device));
             }
 
-            await Task.Delay(500);
+            await Task.Delay(50);
 
             // Assert
             Assert.Equal(cycles, receivedCount); // Only events before unsubscribe
@@ -384,7 +384,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
             ).ToArray();
 
             await Task.WhenAll(tasks);
-            await Task.Delay(500);
+            await Task.Delay(50);
 
             // Assert - No exceptions thrown and all subscriptions were recorded
             Assert.Equal(concurrentOperations, activeSubscriptions.Count);
@@ -421,7 +421,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
                 eventBus.Publish(new DeviceConnectedEvent(device));
             }
 
-            await Task.Delay(1000);
+            await Task.Delay(50);
 
             // Assert
             Assert.Equal(eventCount * 2, successCount); // Two successful subscribers
@@ -454,7 +454,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
                 eventBus.Publish(new DeviceConnectedEvent(device));
             }
 
-            await Task.Delay(1000);
+            await Task.Delay(50);
 
             // Assert - All subscribers should have been invoked despite exceptions
             Assert.Equal(subscriberCount, exceptionCounts.Count);
@@ -491,7 +491,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
                 eventBus.Publish(new DeviceConnectedEvent(device));
             }
 
-            await Task.Delay(2000);
+            await Task.Delay(100);
 
             // Assert
             Assert.Equal(eventCount, receivedCount);
@@ -515,7 +515,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
                 // Subscription cleanup
             }
 
-            await Task.Delay(500);
+            await Task.Delay(50);
 
             // Assert - No memory leaks or exceptions
             // If we got here without issues, the test passes
@@ -568,7 +568,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
 
             // Act
             await Task.WhenAll(publishTask, subscribeTask);
-            await Task.Delay(500); // Allow final processing
+            await Task.Delay(50); // Allow final processing
 
             // Assert
             Assert.True(stats["published"] > 0);
@@ -632,7 +632,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
             }).ToArray();
 
             await Task.WhenAll(tasks);
-            await Task.Delay(1000);
+            await Task.Delay(50);
 
             // Assert
             var expectedCount = deviceCount * sessionCycles;
@@ -667,7 +667,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
 
             var publishTime = stopwatch.ElapsedMilliseconds;
             
-            await Task.Delay(2000);
+            await Task.Delay(100);
             stopwatch.Stop();
 
             // Assert
@@ -703,7 +703,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
                 eventBus.Publish(new DeviceConnectedEvent(device));
             }
 
-            await Task.Delay(2000);
+            await Task.Delay(100);
             stopwatch.Stop();
 
             // Assert

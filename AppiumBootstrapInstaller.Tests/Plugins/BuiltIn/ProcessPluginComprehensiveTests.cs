@@ -552,7 +552,7 @@ namespace AppiumBootstrapInstaller.Tests.Plugins.BuiltIn
             var startResult = await plugin.StartAsync(context, CancellationToken.None);
             Assert.True(startResult);
 
-            await Task.Delay(500); // Let process run briefly
+            await Task.Delay(50); // Let process run briefly
 
             await plugin.StopAsync(CancellationToken.None);
 

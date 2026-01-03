@@ -541,7 +541,7 @@ namespace AppiumBootstrapInstaller.Tests.Plugins.BuiltIn
                 _eventBus.Publish(new DeviceConnectedEvent(device));
             }
 
-            await Task.Delay(500);
+            await Task.Delay(50);
 
             // Assert
             Assert.Equal(10, activationCount);

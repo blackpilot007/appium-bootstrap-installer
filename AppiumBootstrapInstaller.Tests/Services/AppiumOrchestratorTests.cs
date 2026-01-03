@@ -334,7 +334,10 @@ namespace AppiumBootstrapInstaller.Tests.Services
 
             // Act & Assert - With real implementation, canceled token may cause shutdown before listener starts
             // The method may return 1 if cancellation happens before listener initialization completes
-            var result = await orchestrator.RunDeviceListenerAsync(new CancellationToken(true));
+            var task = orchestrator.RunDeviceListenerAsync(new CancellationToken(true));
+            var completedTask = await Task.WhenAny(task, Task.Delay(5000)); // 5 second timeout
+            Assert.True(completedTask == task, "RunDeviceListenerAsync should complete within 5 seconds");
+            var result = await task;
             Assert.True(result == 0 || result == 1, "Expected graceful shutdown or initialization failure");
         }
 
@@ -350,7 +353,10 @@ namespace AppiumBootstrapInstaller.Tests.Services
             cts.Cancel();
 
             // Act
-            var result = await orchestrator.RunDeviceListenerAsync(cts.Token);
+            var task = orchestrator.RunDeviceListenerAsync(cts.Token);
+            var completedTask = await Task.WhenAny(task, Task.Delay(5000)); // 5 second timeout
+            Assert.True(completedTask == task, "RunDeviceListenerAsync should complete within 5 seconds");
+            var result = await task;
 
             // Assert - With real implementation, the method may fail due to complex dependencies
             // The main test is that it doesn't throw unhandled exceptions
@@ -369,7 +375,10 @@ namespace AppiumBootstrapInstaller.Tests.Services
             var orchestrator = CreateOrchestrator();
 
             // Act
-            var result = await orchestrator.RunDeviceListenerAsync(CancellationToken.None);
+            var task = orchestrator.RunDeviceListenerAsync(CancellationToken.None);
+            var completedTask = await Task.WhenAny(task, Task.Delay(5000)); // 5 second timeout
+            Assert.True(completedTask == task, "RunDeviceListenerAsync should complete within 5 seconds");
+            var result = await task;
 
             // Assert
             Assert.Equal(1, result);

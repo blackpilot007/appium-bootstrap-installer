@@ -279,7 +279,7 @@ namespace AppiumBootstrapInstaller
 
             // Plugin subsystem
             services.AddSingleton<AppiumBootstrapInstaller.Plugins.PluginRegistry>();
-            services.AddSingleton<AppiumBootstrapInstaller.Plugins.PluginOrchestrator>();
+            services.AddSingleton<AppiumBootstrapInstaller.Plugins.IPluginOrchestrator, AppiumBootstrapInstaller.Plugins.PluginOrchestrator>();
             // Service definition generator (writes systemd/supervisor templates)
             services.AddSingleton<AppiumBootstrapInstaller.Plugins.ServiceDefinitionGenerator>();
             // Device event trigger listens for device connect/disconnect and starts plugins
