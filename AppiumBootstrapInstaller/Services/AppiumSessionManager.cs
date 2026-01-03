@@ -412,8 +412,7 @@ namespace AppiumBootstrapInstaller.Services
 
                 // Use explicit fully qualified paths, not environment variables
                 var appiumHome = Path.Combine(_installFolder, "appium-home");
-                var nvmPath = Path.Combine(_installFolder, "nvm");
-                var nodejsPath = Path.Combine(nvmPath, "nodejs");
+                var nodejsPath = Path.Combine(_installFolder, "nodejs");
                 var appiumBin = appiumHome; // Appium binaries are in appium-home
                 
                 // Logs directory next to the running binary

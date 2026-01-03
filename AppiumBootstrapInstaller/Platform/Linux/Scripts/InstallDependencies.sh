@@ -152,45 +152,91 @@ install_nvm() {
     log_info "NVM ${NVM_VERSION} installed successfully"
 }
 
-# Install Node.js via NVM
+# Install Node.js directly from nodejs.org (no NVM required)
 install_node() {
-    log_info "Installing Node.js ${NODE_VERSION}..."
-    
-    # Load NVM
-    export NVM_DIR="$HOME/.nvm"
-    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-    
-    if ! command_exists nvm; then
-        log_error "NVM not found. Please install NVM first."
+    log_info "Downloading Node.js ${NODE_VERSION} portable (no NVM, no admin required)..."
+
+    local nodejs_path="$INSTALL_FOLDER/nodejs"
+    local node_bin_path="$nodejs_path/bin"
+
+    # Check if Node.js is already installed
+    if [ -f "$node_bin_path/node" ] && [ -f "$node_bin_path/npm" ]; then
+        local installed_version
+        installed_version=$("$node_bin_path/node" --version 2>/dev/null | sed 's/v//' | cut -d'.' -f1)
+        if [ "$installed_version" = "$NODE_VERSION" ]; then
+            log_info "Node.js ${NODE_VERSION} is already installed at $nodejs_path"
+            export PATH="$node_bin_path:$PATH"
+            return 0
+        else
+            log_warn "Version mismatch. Removing existing installation..."
+            rm -rf "$nodejs_path"
+        fi
+    fi
+
+    # Fetch latest version for the major release
+    log_info "Fetching Node.js release information from nodejs.org..."
+    local index_url="https://nodejs.org/dist/index.json"
+    local releases
+    releases=$(curl -s "$index_url")
+
+    # Find the latest version matching the major version
+    local target_release
+    target_release=$(echo "$releases" | jq -r ".[] | select(.version | test(\"^v${NODE_VERSION}\\\.")) | .version" | head -1)
+
+    if [ -z "$target_release" ]; then
+        log_error "Could not find Node.js version matching v${NODE_VERSION}.*"
         exit 1
     fi
-    
-    nvm install "$NODE_VERSION"
-    nvm use "$NODE_VERSION"
-    nvm alias default "$NODE_VERSION"
-    
-    log_info "Node.js ${NODE_VERSION} installed successfully"
-    node --version
-    npm --version
+
+    local node_version="$target_release"
+    log_info "Found Node.js version: $node_version"
+
+    # Download Node.js portable (linux-x64 tar.gz)
+    local download_url="https://nodejs.org/dist/$node_version/node-$node_version-linux-x64.tar.gz"
+    local tar_path="/tmp/node-$node_version-linux-x64.tar.gz"
+
+    log_info "Downloading from: $download_url"
+    curl -L "$download_url" -o "$tar_path"
+
+    # Extract Node.js
+    log_info "Extracting Node.js to $nodejs_path..."
+    mkdir -p "$nodejs_path"
+    tar -xzf "$tar_path" -C "$nodejs_path" --strip-components=1
+
+    # Clean up
+    rm -f "$tar_path"
+
+    # Verify installation
+    if [ -f "$node_bin_path/node" ] && [ -f "$node_bin_path/npm" ]; then
+        export PATH="$node_bin_path:$PATH"
+        log_info "Node.js ${NODE_VERSION} installed successfully"
+        "$node_bin_path/node" --version
+        "$node_bin_path/npm" --version
+    else
+        log_error "Node.js installation failed"
+        exit 1
+    fi
 }
 
 # Install Appium
 install_appium() {
     log_info "Installing Appium ${APPIUM_VERSION}..."
-    
-    # Load NVM
-    export NVM_DIR="$HOME/.nvm"
-    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-    
+
+    # Ensure Node.js is in PATH
+    local node_bin_path="$INSTALL_FOLDER/nodejs/bin"
+    if [ -d "$node_bin_path" ]; then
+        export PATH="$node_bin_path:$PATH"
+    fi
+
     npm install -g "appium@${APPIUM_VERSION}"
-    
+
     log_info "Appium ${APPIUM_VERSION} installed successfully"
     appium --version
-    
+
     # Detect major version for configuration
     INSTALLED_APPIUM_VERSION=$(appium --version 2>/dev/null || echo "unknown")
     APPIUM_MAJOR_VERSION=$(echo "$INSTALLED_APPIUM_VERSION" | cut -d'.' -f1)
-    
+
     # Create proper configuration based on Appium version
     if [[ "$INSTALLED_APPIUM_VERSION" == 3* ]] || [ "$APPIUM_MAJOR_VERSION" = "3" ]; then
         log_info "Creating Appium 3.x configuration..."
@@ -984,9 +1030,9 @@ main() {
     log_info "========================================"
     log_info "Installation completed successfully!"
     log_info "========================================"
-    log_info "Please restart your shell or run:"
-    log_info "  source ~/.nvm/nvm.sh"
-    log_info "  nvm use ${NODE_VERSION}"
+    log_info "Node.js binaries are available at: $INSTALL_FOLDER/nodejs/bin"
+    log_info "You may want to add this to your PATH:"
+    log_info "  export PATH=\"$INSTALL_FOLDER/nodejs/bin:\$PATH\""
 }
 
 # Parse arguments and run main

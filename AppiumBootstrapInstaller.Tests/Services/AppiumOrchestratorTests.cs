@@ -101,11 +101,11 @@ namespace AppiumBootstrapInstaller.Tests.Services
 
             // Create service setup scripts
             File.WriteAllText(
-                Path.Combine(windowsScripts, "SetupService.ps1"),
+                Path.Combine(windowsScripts, "ServiceSetup.ps1"),
                 "# Test service setup\nexit 0"
             );
-            File.WriteAllText(Path.Combine(macosScripts, "SetupService.sh"), bashScript);
-            File.WriteAllText(Path.Combine(linuxScripts, "SetupService.sh"), bashScript);
+            File.WriteAllText(Path.Combine(macosScripts, "SupervisorSetup.sh"), bashScript);
+            File.WriteAllText(Path.Combine(linuxScripts, "SystemdSetup.sh"), bashScript);
         }
 
         private AppiumOrchestrator CreateOrchestrator()
@@ -172,8 +172,15 @@ namespace AppiumBootstrapInstaller.Tests.Services
             var orchestrator = CreateOrchestrator();
             var options = new CommandLineOptions { DryRun = true }; // Use dry run for faster test
 
+            // Create a cancelled token to prevent hanging
+            var cts = new CancellationTokenSource();
+            cts.Cancel();
+
             // Act
-            var result = await orchestrator.RunInstallationAsync(options, CancellationToken.None);
+            var task = orchestrator.RunInstallationAsync(options, cts.Token);
+            var completedTask = await Task.WhenAny(task, Task.Delay(5000)); // 5 second timeout
+            Assert.True(completedTask == task, "RunInstallationAsync should complete within 5 seconds");
+            var result = await task;
 
             // Assert
             // When device listener is enabled, service setup should be skipped
