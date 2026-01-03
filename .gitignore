@@ -430,3 +430,4 @@ USER_GUIDE.html
 /test-build-arm64
 /test-build-x64-no-trim
 /test-build-x64
+/test-release-build
