@@ -56,7 +56,7 @@ function Write-ColorOutput {
 }
 
 function Get-CurrentVersion {
-    $versionFile = "publish/VERSION"
+    $versionFile = "VERSION"
     if (-not (Test-Path $versionFile)) {
         throw "VERSION file not found at: $versionFile"
     }
@@ -119,7 +119,7 @@ function Update-VersionFile {
         [bool]$DryRun
     )
     
-    $versionFile = "publish/VERSION"
+    $versionFile = "VERSION"
     
     if ($DryRun) {
         Write-ColorOutput "  [DRY RUN] Would update $versionFile to: $NewVersion" "Yellow"
@@ -143,7 +143,7 @@ function Create-GitTag {
     }
     else {
         # Commit VERSION file change
-        git add publish/VERSION
+        git add VERSION
         git commit -m "chore: bump version to $Version"
         
         # Create annotated tag

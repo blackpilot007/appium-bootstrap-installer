@@ -53,7 +53,13 @@ jobs:
             VERSION="${{ inputs.version }}"
           else
             # Auto-increment based on release type
-            CURRENT_VERSION=$(cat publish/VERSION | tr -d '[:space:]')
+            if [ -f "VERSION" ]; then
+              CURRENT_VERSION=$(cat VERSION | tr -d '[:space:]')
+            else
+              echo "VERSION file not found, defaulting to 0.10.1"
+              CURRENT_VERSION="0.10.1"
+            fi
+            
             IFS='.' read -ra VER <<< "$CURRENT_VERSION"
             MAJOR=${VER[0]}
             MINOR=${VER[1]}
@@ -297,23 +303,22 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Update VERSION files
+    - name: Update VERSION file
       if: github.event_name == 'workflow_dispatch'
       run: |
-        echo "Updating VERSION files to ${{ needs.prepare-release.outputs.version }}"
+        echo "Updating VERSION to ${{ needs.prepare-release.outputs.version }}"
         echo -n "${{ needs.prepare-release.outputs.version }}" > VERSION
-        echo -n "${{ needs.prepare-release.outputs.version }}" > publish/VERSION
         
-        # Check if files changed
-        git diff VERSION publish/VERSION
+        # Check if file changed
+        git diff VERSION || true
         
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
-        git add VERSION publish/VERSION
+        git add VERSION
         
         # Only commit if there are changes
         if git diff --staged --quiet; then
-          echo "No changes to VERSION files, skipping commit"
+          echo "No changes to VERSION file, skipping commit"
         else
           git commit -m "chore: bump version to ${{ needs.prepare-release.outputs.version }}"
           git push origin HEAD:main
