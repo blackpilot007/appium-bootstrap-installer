@@ -307,47 +307,88 @@ setup_nvm() {
     check_success "nvm environment setup"
 }
 
-# Install and use the specified Node.js version
+# Install Node.js directly from nodejs.org (no NVM required)
 setup_node() {
     local date_time=$(date '+%Y-%m-%d %H:%M:%S')
     echo "[${date_time} INF] \"================================================================\""
     echo "[${date_time} INF] \"               STARTING NODE.JS INSTALLATION                    \""
     echo "[${date_time} INF] \"================================================================\""
-    
-    echo "Checking existing Node.js version..."
-    existing_node_version=$(node --version 2>/dev/null | sed 's/v//')
-    
-    if [ "$existing_node_version" == "$NODE_VERSION" ]; then
-        echo "Node.js version $NODE_VERSION is already installed. Setting nvm to use it..."
-        export NVM_DIR="$INSTALL_FOLDER/.nvm"
-        \. "$NVM_DIR/nvm.sh"
-        nvm use --delete-prefix "$NODE_VERSION" --silent || { echo "Error: Failed to use Node.js version $NODE_VERSION."; exit 1; }
-        
-        local date_time=$(date '+%Y-%m-%d %H:%M:%S')
-        echo "[${date_time} INF] \"================================================================\""
-        echo "[${date_time} INF] \"             NODE.JS ALREADY INSTALLED SUCCESSFULLY             \""
-        echo "[${date_time} INF] \"================================================================\""
-    else
-        echo "Installing and setting up Node.js version $NODE_VERSION using nvm in local folder..."
-        export NVM_DIR="$INSTALL_FOLDER/.nvm"
-        \. "$NVM_DIR/nvm.sh"
 
-        # Ensure the specified Node.js version exists
-        if ! nvm ls-remote | grep -q "v$NODE_VERSION"; then
-            echo "Error: Node.js version $NODE_VERSION not found. Please check available versions using 'nvm ls-remote'."
-            exit 1
+    echo "Downloading Node.js $NODE_VERSION portable (no NVM, no admin required)..."
+
+    local nodejs_path="$INSTALL_FOLDER/nodejs"
+    local node_bin_path="$nodejs_path/bin"
+
+    # Check if Node.js is already installed
+    if [ -f "$node_bin_path/node" ] && [ -f "$node_bin_path/npm" ]; then
+        local installed_version
+        installed_version=$("$node_bin_path/node" --version 2>/dev/null | sed 's/v//' | cut -d'.' -f1)
+        if [ "$installed_version" = "$NODE_VERSION" ]; then
+            echo "Node.js ${NODE_VERSION} is already installed at $nodejs_path"
+            export PATH="$node_bin_path:$PATH"
+            return 0
+        else
+            echo "Version mismatch. Removing existing installation..."
+            rm -rf "$nodejs_path"
         fi
-
-        nvm install "$NODE_VERSION" || { echo "Error: Failed to install Node.js version $NODE_VERSION."; exit 1; }
-        nvm use --delete-prefix "$NODE_VERSION" --silent || { echo "Error: Failed to use Node.js version $NODE_VERSION."; exit 1; }
-        nvm alias default "$NODE_VERSION" || { echo "Error: Failed to set default Node.js version."; exit 1; }
-        nvm use default || { echo "Error: Failed to use default Node.js version."; exit 1; }
-        check_success "Node.js $NODE_VERSION setup"
     fi
 
-    # Remove npm-global configuration
-    npm config delete prefix || { echo "Error: Failed to remove npm prefix configuration."; exit 1; }
-    check_success "npm configuration reset"
+    # Determine architecture
+    local arch_suffix
+    if [[ "$ARCH" == "arm64" ]]; then
+        arch_suffix="darwin-arm64"
+    else
+        arch_suffix="darwin-x64"
+    fi
+
+    # Fetch latest version for the major release
+    echo "Fetching Node.js release information from nodejs.org..."
+    local index_url="https://nodejs.org/dist/index.json"
+    local releases
+    releases=$(curl -s "$index_url")
+
+    # Find the latest version matching the major version
+    local target_release
+    target_release=$(echo "$releases" | /usr/local/bin/jq -r ".[] | select(.version | test(\"^v${NODE_VERSION}\\\.")) | .version" | head -1 2>/dev/null || echo "$releases" | grep -o '"version":"v[^"]*' | grep "^\"version\":\"v${NODE_VERSION}\." | head -1 | sed 's/"version":"//')
+
+    if [ -z "$target_release" ]; then
+        echo "Could not find Node.js version matching v${NODE_VERSION}.*"
+        exit 1
+    fi
+
+    local node_version="$target_release"
+    echo "Found Node.js version: $node_version"
+
+    # Download Node.js portable (macOS tar.gz)
+    local download_url="https://nodejs.org/dist/$node_version/node-$node_version-$arch_suffix.tar.gz"
+    local tar_path="/tmp/node-$node_version-$arch_suffix.tar.gz"
+
+    echo "Downloading from: $download_url"
+    curl -L "$download_url" -o "$tar_path"
+
+    # Extract Node.js
+    echo "Extracting Node.js to $nodejs_path..."
+    mkdir -p "$nodejs_path"
+    tar -xzf "$tar_path" -C "$nodejs_path" --strip-components=1
+
+    # Clean up
+    rm -f "$tar_path"
+
+    # Verify installation
+    if [ -f "$node_bin_path/node" ] && [ -f "$node_bin_path/npm" ]; then
+        export PATH="$node_bin_path:$PATH"
+        echo "Node.js ${NODE_VERSION} installed successfully"
+        "$node_bin_path/node" --version
+        "$node_bin_path/npm" --version
+
+        # Remove npm-global configuration
+        "$node_bin_path/npm" config delete prefix || { echo "Error: Failed to remove npm prefix configuration."; exit 1; }
+        check_success "npm configuration reset"
+    else
+        echo "Node.js installation failed"
+        exit 1
+    fi
+}
 
     # Get Node.js binary path
     NODE_BIN_PATH=$(nvm which "$NODE_VERSION")
@@ -398,12 +439,12 @@ install_appium() {
     fi
 
     echo "Installing Appium $APPIUM_VERSION freshly in $APPIUM_HOME using npm from Node.js installation..."
-    NODE_BIN_PATH=$(nvm which "$NODE_VERSION")
-    NPM_BIN_PATH=$(dirname "$NODE_BIN_PATH")/npm  # Explicitly locate npm binary
+    NODE_BIN_PATH="$INSTALL_FOLDER/nodejs/bin/node"
+    NPM_BIN_PATH="$INSTALL_FOLDER/nodejs/bin/npm"  # Explicitly locate npm binary
     
     echo "Node.js binary path: $NODE_BIN_PATH"
     echo "NPM binary path: $NPM_BIN_PATH"
-    echo "Node.js version: $(node --version)"
+    echo "Node.js version: $("$NODE_BIN_PATH" --version)"
     echo "NPM version: $("$NPM_BIN_PATH" --version)"
 
     # Create a package.json file in APPIUM_HOME
@@ -2028,31 +2069,9 @@ create_environment_scripts() {
 #!/bin/bash
 # Environment setup for Appium
 export APPIUM_HOME="$APPIUM_HOME"
-export NVM_DIR="$INSTALL_FOLDER/.nvm"
 
-# Load NVM and use the correct Node.js version
-if [ -s "\$NVM_DIR/nvm.sh" ]; then
-    echo "Loading NVM from \$NVM_DIR"
-    . "\$NVM_DIR/nvm.sh" --no-use > /dev/null 2>&1  # Load NVM quietly
-    
-    # Use the Node.js version that was used to install Appium
-    if nvm use "$NODE_VERSION" > /dev/null 2>&1; then
-        echo "Using Node.js version $NODE_VERSION from NVM"
-    elif nvm use default > /dev/null 2>&1; then
-        echo "Using default Node.js version from NVM"
-    else
-        echo "Warning: Could not activate Node.js from NVM"
-    fi
-    
-    # Get Node.js binary path and add to PATH
-    NODE_BIN=\$(nvm which current 2>/dev/null)
-    if [ -n "\$NODE_BIN" ]; then
-        NODE_DIR=\$(dirname "\$NODE_BIN")
-        export PATH="\$NODE_DIR:\$PATH"
-    fi
-else
-    echo "NVM script not found at \$NVM_DIR/nvm.sh"
-fi
+# Add Node.js to PATH (direct installation, no NVM required)
+export PATH="$INSTALL_FOLDER/nodejs/bin:\$PATH"
 
 # Add Appium paths to PATH
 export PATH="$bin_dir:$APPIUM_HOME/node_modules/.bin:\$PATH"
@@ -2060,7 +2079,7 @@ export PATH="$bin_dir:$APPIUM_HOME/node_modules/.bin:\$PATH"
 # Print environment info
 echo "Appium environment activated:"
 echo "APPIUM_HOME=$APPIUM_HOME"
-echo "NVM_DIR=\$NVM_DIR"
+echo "NODEJS_HOME=$INSTALL_FOLDER/nodejs"
 echo "NODE_VERSION=\$(node --version 2>/dev/null || echo 'not found')"
 echo "NPM_VERSION=\$(npm --version 2>/dev/null || echo 'not found')"
 echo "APPIUM_VERSION=\$($APPIUM_HOME/node_modules/.bin/appium --version 2>/dev/null || echo 'not found')"
@@ -2076,20 +2095,9 @@ source "$INSTALL_FOLDER/appium-env.sh"
 # Set APPIUM_HOME for both Appium 2.x and 3.x
 export APPIUM_HOME="$APPIUM_HOME"
 
-# Ensure we're using the custom Node.js
-export NVM_DIR="$INSTALL_FOLDER/.nvm"
-if [ -s "\$NVM_DIR/nvm.sh" ]; then
-    . "\$NVM_DIR/nvm.sh" --no-use > /dev/null 2>&1
-    nvm use "$NODE_VERSION" > /dev/null 2>&1 || nvm use default > /dev/null 2>&1
-    
-    # Get Node.js binary path and add to PATH
-    NODE_BIN=\$(nvm which current 2>/dev/null)
-    if [ -n "\$NODE_BIN" ]; then
-        NODE_DIR=\$(dirname "\$NODE_BIN")
-        export PATH="\$NODE_DIR:\$PATH"
-        echo "Using Node.js: \$(node --version)"
-    fi
-fi
+# Ensure we're using the custom Node.js (direct installation, no NVM required)
+export PATH="$INSTALL_FOLDER/nodejs/bin:\$PATH"
+echo "Using Node.js: \$(node --version)"
 
 # Detect Appium version
 APPIUM_VERSION=\$("$APPIUM_HOME/node_modules/.bin/appium" --version 2>/dev/null)
@@ -2119,7 +2127,6 @@ main() {
     set_locale
     enable_rosetta
     install_xcode_select
-    setup_nvm
     setup_node
     install_appium
     

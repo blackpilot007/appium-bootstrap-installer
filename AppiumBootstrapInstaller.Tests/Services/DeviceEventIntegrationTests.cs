@@ -65,7 +65,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
 
             // Act
             _eventBus.Publish(new DeviceConnectedEvent(device));
-            await Task.Delay(100); // Allow event processing
+            await Task.Delay(10); // Allow event processing
 
             // Assert
             Assert.True(eventReceived);
@@ -97,7 +97,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
 
             // Act
             _eventBus.Publish(new DeviceConnectedEvent(device));
-            await Task.Delay(100);
+            await Task.Delay(10);
 
             // Assert
             Assert.True(eventReceived);
@@ -128,7 +128,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
 
             // Act
             _eventBus.Publish(new DeviceConnectedEvent(device));
-            await Task.Delay(100);
+            await Task.Delay(10);
 
             // Assert
             Assert.True(subscriber1Received);
@@ -153,7 +153,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
 
             // Act
             _eventBus.Publish(new DeviceConnectedEvent(device));
-            await Task.Delay(100);
+            await Task.Delay(10);
 
             // Assert
             Assert.NotNull(receivedDevice);
@@ -189,7 +189,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
 
             // Act
             _eventBus.Publish(new DeviceDisconnectedEvent(device));
-            await Task.Delay(100);
+            await Task.Delay(10);
 
             // Assert
             Assert.True(eventReceived);
@@ -221,7 +221,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
 
             // Act
             _eventBus.Publish(new DeviceDisconnectedEvent(device));
-            await Task.Delay(100);
+            await Task.Delay(10);
 
             // Assert
             Assert.True(eventReceived);
@@ -242,7 +242,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
             // Act
             _eventBus.Publish(new DeviceDisconnectedEvent(device1));
             _eventBus.Publish(new DeviceDisconnectedEvent(device2));
-            await Task.Delay(100);
+            await Task.Delay(10);
 
             // Assert
             Assert.Equal(2, receivedDeviceIds.Count);
@@ -288,7 +288,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
 
             // Act
             _eventBus.Publish(new SessionStartedEvent(device, session));
-            await Task.Delay(100);
+            await Task.Delay(10);
 
             // Assert
             Assert.True(eventReceived);
@@ -314,9 +314,9 @@ namespace AppiumBootstrapInstaller.Tests.Services
 
             // Act
             _eventBus.Publish(new SessionStartedEvent(device1, session1));
-            await Task.Delay(50);
+            await Task.Delay(5);
             _eventBus.Publish(new SessionStartedEvent(device2, session2));
-            await Task.Delay(50);
+            await Task.Delay(5);
 
             // Assert
             Assert.Equal(2, receivedSessionIds.Count);
@@ -343,7 +343,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
 
             // Act
             _eventBus.Publish(new SessionStartedEvent(device, session));
-            await Task.Delay(100);
+            await Task.Delay(10);
 
             // Assert
             Assert.NotNull(receivedSession);
@@ -387,7 +387,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
 
             // Act
             _eventBus.Publish(new SessionStoppedEvent(device, session));
-            await Task.Delay(100);
+            await Task.Delay(10);
 
             // Assert
             Assert.True(eventReceived);
@@ -415,7 +415,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
             _eventBus.Publish(new SessionStoppedEvent(device1, session1));
             _eventBus.Publish(new SessionStoppedEvent(device2, session2));
             _eventBus.Publish(new SessionStoppedEvent(device3, session3));
-            await Task.Delay(100);
+            await Task.Delay(10);
 
             // Assert
             Assert.Equal(3, receivedCount);
@@ -451,7 +451,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
 
             // Act
             _eventBus.Publish(new SessionFailedEvent(device, reason));
-            await Task.Delay(100);
+            await Task.Delay(10);
 
             // Assert
             Assert.True(eventReceived);
@@ -472,11 +472,11 @@ namespace AppiumBootstrapInstaller.Tests.Services
 
             // Act
             _eventBus.Publish(new SessionFailedEvent(device, "Port allocation failed"));
-            await Task.Delay(50);
+            await Task.Delay(5);
             _eventBus.Publish(new SessionFailedEvent(device, "Device offline"));
-            await Task.Delay(50);
+            await Task.Delay(5);
             _eventBus.Publish(new SessionFailedEvent(device, "Appium binary not found"));
-            await Task.Delay(50);
+            await Task.Delay(5);
 
             // Assert
             Assert.Equal(3, receivedReasons.Count);
@@ -516,17 +516,17 @@ namespace AppiumBootstrapInstaller.Tests.Services
 
             // Act
             _eventBus.Publish(new DeviceConnectedEvent(device));
-            await Task.Delay(50);
+            await Task.Delay(5);
 
             _eventBus.Publish(new SessionStartedEvent(device, session));
-            await Task.Delay(50);
+            await Task.Delay(5);
 
             _eventBus.Publish(new SessionStoppedEvent(device, session));
-            await Task.Delay(50);
+            await Task.Delay(5);
 
             device.State = DeviceState.Disconnected;
             _eventBus.Publish(new DeviceDisconnectedEvent(device));
-            await Task.Delay(50);
+            await Task.Delay(5);
 
             // Assert
             Assert.Equal(4, events.Count);
@@ -555,14 +555,14 @@ namespace AppiumBootstrapInstaller.Tests.Services
 
             // Act
             _eventBus.Publish(new DeviceConnectedEvent(device));
-            await Task.Delay(50);
+            await Task.Delay(5);
 
             _eventBus.Publish(new SessionFailedEvent(device, "Initialization failed"));
-            await Task.Delay(50);
+            await Task.Delay(5);
 
             device.State = DeviceState.Disconnected;
             _eventBus.Publish(new DeviceDisconnectedEvent(device));
-            await Task.Delay(50);
+            await Task.Delay(5);
 
             // Assert
             Assert.Equal(3, events.Count);
@@ -588,7 +588,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
             // Act
             _eventBus.Publish(new DeviceConnectedEvent(device1));
             _eventBus.Publish(new DeviceConnectedEvent(device2));
-            await Task.Delay(100);
+            await Task.Delay(10);
 
             // Assert
             Assert.Equal(2, receivedDeviceIds.Count);
@@ -618,7 +618,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
             _eventBus.Publish(new SessionStartedEvent(device1, session1));
             _eventBus.Publish(new SessionStartedEvent(device2, session2));
             _eventBus.Publish(new SessionStartedEvent(device3, session3));
-            await Task.Delay(100);
+            await Task.Delay(10);
 
             // Assert
             Assert.Equal(3, sessionMap.Count);
@@ -676,14 +676,14 @@ namespace AppiumBootstrapInstaller.Tests.Services
 
             // Act
             _eventBus.Publish(new DeviceConnectedEvent(device));
-            await Task.Delay(50);
+            await Task.Delay(5);
             Assert.Equal(1, receivedCount);
 
             // Unsubscribe
             _eventBus.Unsubscribe(handler);
 
             _eventBus.Publish(new DeviceConnectedEvent(device));
-            await Task.Delay(50);
+            await Task.Delay(5);
 
             // Assert
             Assert.Equal(1, receivedCount); // Should still be 1, not 2
@@ -705,7 +705,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
 
             // Act
             _eventBus.Publish(new DeviceConnectedEvent(device));
-            await Task.Delay(50);
+            await Task.Delay(5);
             Assert.Equal(1, count1);
             Assert.Equal(1, count2);
 
@@ -713,7 +713,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
             // Both handlers will continue to receive events
 
             _eventBus.Publish(new DeviceConnectedEvent(device));
-            await Task.Delay(50);
+            await Task.Delay(5);
 
             // Assert
             Assert.Equal(2, count1); // Both should increment
@@ -749,7 +749,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
 
             // Act
             _eventBus.Publish(new DeviceConnectedEvent(device));
-            await Task.Delay(100);
+            await Task.Delay(10);
 
             // Assert
             Assert.True(received1);
@@ -777,7 +777,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
                 _eventBus.Publish(new DeviceConnectedEvent(device));
             }
 
-            await Task.Delay(500); // Allow time for all events to process
+            await Task.Delay(50); // Allow time for all events to process
 
             // Assert
             Assert.Equal(eventCount, receivedCount);
@@ -805,7 +805,7 @@ namespace AppiumBootstrapInstaller.Tests.Services
             }
 
             await Task.WhenAll(tasks);
-            await Task.Delay(500);
+            await Task.Delay(50);
 
             // Assert
             Assert.Equal(concurrentPublishes, receivedCount);
