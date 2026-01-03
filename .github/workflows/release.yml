@@ -132,16 +132,17 @@ jobs:
       run: dotnet restore ${{ env.PROJECT_FILE }}
 
     - name: Build ${{ matrix.platform-name }}
+      shell: bash
       run: |
-        dotnet publish ${{ env.PROJECT_FILE }} `
-          --configuration ${{ env.BUILD_CONFIGURATION }} `
-          --runtime ${{ matrix.runtime }} `
-          --self-contained true `
-          -p:PublishSingleFile=true `
-          -p:PublishTrimmed=false `
-          -p:PublishReadyToRun=false `
-          -p:IncludeNativeLibrariesForSelfExtract=true `
-          -p:Version=${{ needs.prepare-release.outputs.version }} `
+        dotnet publish ${{ env.PROJECT_FILE }} \
+          --configuration ${{ env.BUILD_CONFIGURATION }} \
+          --runtime ${{ matrix.runtime }} \
+          --self-contained true \
+          -p:PublishSingleFile=true \
+          -p:PublishTrimmed=false \
+          -p:PublishReadyToRun=false \
+          -p:IncludeNativeLibrariesForSelfExtract=true \
+          -p:Version=${{ needs.prepare-release.outputs.version }} \
           --output ./build-output
 
     - name: Package Platform Scripts (Windows)
@@ -164,8 +165,11 @@ jobs:
         
         # Copy platform-specific scripts
         if ("${{ matrix.runtime }}" -like "win-*") {
-          if (Test-Path "Platform/Windows/Scripts/*") {
-            Copy-Item "Platform/Windows/Scripts/*" -Destination "$outputDir/Platform/Windows/Scripts/" -Recurse -Force
+          $scriptsPath = "Platform/Windows/Scripts"
+          $destPath = "$outputDir/Platform/Windows/Scripts"
+          New-Item -ItemType Directory -Path $destPath -Force | Out-Null
+          if (Test-Path $scriptsPath) {
+            Copy-Item "$scriptsPath/*" -Destination $destPath -Recurse -Force -ErrorAction SilentlyContinue
           }
         }
         
