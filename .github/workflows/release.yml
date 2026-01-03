@@ -300,11 +300,10 @@ jobs:
     - name: Update VERSION file
       if: github.event_name == 'workflow_dispatch'
       run: |
-        mkdir -p publish
-        echo -n "${{ needs.prepare-release.outputs.version }}" > publish/VERSION
+        echo -n "${{ needs.prepare-release.outputs.version }}" > VERSION
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
-        git add publish/VERSION
+        git add VERSION
         git commit -m "chore: bump version to ${{ needs.prepare-release.outputs.version }}"
         git push origin HEAD:main
       env:
@@ -347,9 +346,14 @@ jobs:
           }
         }
         
-        # Test executable
-        $version = & "./test-install/AppiumBootstrapInstaller.exe" --version
-        Write-Host "✅ Version check passed: $version"
+        # Test executable responds to --help
+        $helpOutput = & "./test-install/AppiumBootstrapInstaller.exe" --help 2>&1
+        if ($LASTEXITCODE -eq 0 -and $helpOutput -match "Appium Bootstrap Installer") {
+          Write-Host "✅ Executable test passed"
+        } else {
+          Write-Error "Executable test failed"
+          exit 1
+        }
 
     - name: Extract and test (Unix)
       if: runner.os != 'Windows'
@@ -367,7 +371,11 @@ jobs:
           fi
         done
         
-        # Test executable
+        # Test executable responds to --help
         chmod +x ./test-install/AppiumBootstrapInstaller
-        version=$(./test-install/AppiumBootstrapInstaller --version)
-        echo "✅ Version check passed: $version"
+        if ./test-install/AppiumBootstrapInstaller --help 2>&1 | grep -q "Appium Bootstrap Installer"; then
+          echo "✅ Executable test passed"
+        else
+          echo "❌ Executable test failed"
+          exit 1
+        fi
