@@ -297,15 +297,27 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Update VERSION file
+    - name: Update VERSION files
       if: github.event_name == 'workflow_dispatch'
       run: |
+        echo "Updating VERSION files to ${{ needs.prepare-release.outputs.version }}"
         echo -n "${{ needs.prepare-release.outputs.version }}" > VERSION
+        echo -n "${{ needs.prepare-release.outputs.version }}" > publish/VERSION
+        
+        # Check if files changed
+        git diff VERSION publish/VERSION
+        
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
-        git add VERSION
-        git commit -m "chore: bump version to ${{ needs.prepare-release.outputs.version }}"
-        git push origin HEAD:main
+        git add VERSION publish/VERSION
+        
+        # Only commit if there are changes
+        if git diff --staged --quiet; then
+          echo "No changes to VERSION files, skipping commit"
+        else
+          git commit -m "chore: bump version to ${{ needs.prepare-release.outputs.version }}"
+          git push origin HEAD:main
+        fi
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
