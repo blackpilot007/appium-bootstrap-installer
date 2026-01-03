@@ -34,7 +34,6 @@ bld/
 [Ll]og/
 [Ll]ogs/
 publish/
-!publish/VERSION
 
 # Build results on 'Bin' directories
 **/[Bb]in/*
@@ -197,7 +196,6 @@ DocProject/Help/html
 
 # Click-Once directory
 publish/
-!publish/VERSION
 
 # Publish Web Output
 *.[Pp]ublish.xml
