@@ -300,6 +300,7 @@ jobs:
     - name: Update VERSION file
       if: github.event_name == 'workflow_dispatch'
       run: |
+        mkdir -p publish
         echo -n "${{ needs.prepare-release.outputs.version }}" > publish/VERSION
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
